@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日本家屋の耐震シミュレーター</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #213047;
+      --muted: #5f6f86;
+      --panel: #ffffff;
+      --line: #d9e2ef;
+      --accent: #1d6fd6;
+      --danger: #d64545;
+      --warning: #c68a00;
+      --stable: #167a3b;
+      --bg: #eef4fb;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+    }
+
+    header {
+      padding: 18px clamp(16px, 3vw, 32px) 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(1.45rem, 2.8vw, 2.2rem);
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      margin: 0;
+      max-width: 980px;
+      color: var(--muted);
+      font-size: clamp(0.92rem, 1.5vw, 1rem);
+      line-height: 1.7;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(250px, 310px) 1fr minmax(230px, 290px);
+      gap: 14px;
+      padding: 14px clamp(12px, 2vw, 24px) 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 10px 28px rgba(30, 55, 90, 0.08);
+      padding: 16px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 1.08rem;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 9px;
+      margin-bottom: 18px;
+    }
+
+    label, .group-label {
+      font-weight: 700;
+      font-size: 0.94rem;
+    }
+
+    .radio-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      cursor: pointer;
+      background: #fbfdff;
+    }
+
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+    .range-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .value-pill {
+      min-width: 58px;
+      text-align: right;
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-weight: 800;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(29, 111, 214, 0.2);
+    }
+
+    button.secondary { background: #6a788d; }
+    button.slow.active { background: #8c4ac9; }
+
+    .canvas-panel { padding: 10px; min-width: 0; }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: min(62vh, 620px);
+      min-height: 430px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .status-card {
+      border-radius: 14px;
+      padding: 13px;
+      margin-bottom: 12px;
+      background: #f7fbff;
+      border: 1px solid var(--line);
+    }
+
+    .status-text {
+      display: inline-block;
+      margin-top: 5px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: #fff;
+      font-weight: 900;
+      background: var(--stable);
+    }
+
+    .status-text.caution { background: var(--warning); }
+    .status-text.collapsed { background: var(--danger); }
+
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 0;
+      border-bottom: 1px dashed var(--line);
+      font-size: 0.95rem;
+    }
+
+    .metric:last-child { border-bottom: 0; }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 9px 0;
+      color: var(--muted);
+    }
+
+    .swatch {
+      width: 34px;
+      height: 9px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .note {
+      margin: 12px 0 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 1040px) {
+      main { grid-template-columns: 1fr; }
+      canvas { height: 54vh; }
+      .buttons { grid-template-columns: repeat(4, 1fr); }
+    }
+
+    @media (max-width: 620px) {
+      .buttons { grid-template-columns: 1fr 1fr; }
+      canvas { min-height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>日本家屋の耐震シミュレーター<br><span style="color:#1d6fd6">四角形はゆがむ。三角形は強い。</span></h1>
+    <p class="subtitle">柱と梁だけの四角い構造は、地震の横揺れで平行四辺形に変形しやすくなります。筋交いを入れて三角形を作ると、変形を抑えやすくなります。</p>
+  </header>
+
+  <main>
+    <section class="panel" aria-label="操作UI">
+      <h2>操作</h2>
+      <div class="control-group">
+        <div class="group-label">構造パターン</div>
+        <label class="radio-row"><input type="radio" name="pattern" value="none" checked> 筋交いなし</label>
+        <label class="radio-row"><input type="radio" name="pattern" value="single"> 片筋交い</label>
+        <label class="radio-row"><input type="radio" name="pattern" value="x"> たすき掛け筋交い（X字）</label>
+      </div>
+
+      <div class="control-group">
+        <div class="range-head"><label for="amplitude">地震の強さ</label><span id="amplitudeValue" class="value-pill">35 px</span></div>
+        <input id="amplitude" type="range" min="0" max="80" value="35" step="1">
+      </div>
+
+      <div class="control-group">
+        <div class="range-head"><label for="frequency">地震の周波数</label><span id="frequencyValue" class="value-pill">1.2 Hz</span></div>
+        <input id="frequency" type="range" min="0.3" max="3.0" value="1.2" step="0.1">
+      </div>
+
+      <div class="buttons">
+        <button id="startBtn">開始</button>
+        <button id="pauseBtn" class="secondary">一時停止</button>
+        <button id="resetBtn" class="secondary">リセット</button>
+        <button id="slowBtn" class="slow secondary">スローOFF</button>
+      </div>
+      <p class="note">標準設定では「筋交いなし」が最も大きくラッキング変形し、「X字筋交い」が最も安定します。</p>
+    </section>
+
+    <section class="panel canvas-panel">
+      <canvas id="simCanvas" width="900" height="560" aria-label="耐震シミュレーション表示"></canvas>
+    </section>
+
+    <aside class="panel" aria-label="凡例と状態">
+      <h2>状態表示</h2>
+      <div class="status-card">
+        <div class="metric"><strong>現在の構造</strong><span id="patternLabel">筋交いなし</span></div>
+        <div class="metric"><strong>破断した部材数</strong><span id="brokenCount">0</span></div>
+        <div class="metric"><strong>最大負荷</strong><span id="maxStress">0%</span></div>
+        <div>状態<br><span id="statusText" class="status-text">安定</span></div>
+      </div>
+
+      <h2>凡例</h2>
+      <div class="legend-item"><span class="swatch" style="background:#19a84a"></span>緑：安全</div>
+      <div class="legend-item"><span class="swatch" style="background:#f3c623"></span>黄：注意</div>
+      <div class="legend-item"><span class="swatch" style="background:#e23b2f"></span>赤：破断寸前</div>
+      <div class="legend-item"><span class="swatch" style="background:#9aa3ad"></span>灰色：破断済み</div>
+      <p class="note">筋交いは引張には強く、圧縮では座屈しやすい設定です。X字筋交いは左右どちらの揺れでも、どちらか一方が引張で働きます。</p>
+    </aside>
+  </main>
+
+  <script>
+    'use strict';
+
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    const amplitudeSlider = document.getElementById('amplitude');
+    const frequencySlider = document.getElementById('frequency');
+    const amplitudeValue = document.getElementById('amplitudeValue');
+    const frequencyValue = document.getElementById('frequencyValue');
+    const patternLabel = document.getElementById('patternLabel');
+    const brokenCountEl = document.getElementById('brokenCount');
+    const maxStressEl = document.getElementById('maxStress');
+    const statusText = document.getElementById('statusText');
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const slowBtn = document.getElementById('slowBtn');
+
+    const FIXED_DT = 1 / 60;
+    const MAX_STEPS_PER_FRAME = 5;
+    const CONSTRAINT_ITERATIONS = 16;
+    const DAMPING = 0.985;
+    const GRAVITY = 900;
+    const COLLAPSE_TILT_THRESHOLD = 0.4;
+    const PATTERN_NAMES = { none: '筋交いなし', single: '片筋交い', x: 'X字筋交い' };
+
+    let nodes = [];
+    let sticks = [];
+    let columns = [];
+    let running = false;
+    let slowMotion = false;
+    let simTime = 0;
+    let accumulator = 0;
+    let lastFrameTime = performance.now();
+    let currentPattern = 'none';
+    let collapsed = false;
+    let maxStressRatio = 0;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function distance(a, b) {
+      return Math.hypot(b.x - a.x, b.y - a.y);
+    }
+
+    function resizeCanvasToDisplaySize() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.round(rect.width * dpr);
+      const height = Math.round(rect.height * dpr);
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        resetSimulation(false);
+      } else {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+    }
+
+    function addNode(x, y, fixed, label) {
+      nodes.push({ x, y, px: x, py: y, baseX: x, baseY: y, fixed, label });
+      return nodes.length - 1;
+    }
+
+    function paramsForType(type) {
+      if (type === 'brace') {
+        // 筋交いの引張・圧縮の違い：引張は強く、圧縮は座屈しやすいように低剛性・低限界にする。
+        return { maxTensionStrain: 0.09, maxCompressionStrain: -0.018, tensionStiffness: 1.0, compressionStiffness: 0.15 };
+      }
+      if (type === 'foundation') {
+        return { maxTensionStrain: 999, maxCompressionStrain: -999, tensionStiffness: 1.0, compressionStiffness: 1.0 };
+      }
+      return { maxTensionStrain: 0.07, maxCompressionStrain: -0.06, tensionStiffness: 1.0, compressionStiffness: 1.0 };
+    }
+
+    function addStick(a, b, type, label) {
+      const p = paramsForType(type);
+      sticks.push({
+        a, b,
+        restLength: distance(nodes[a], nodes[b]),
+        type,
+        label,
+        maxTensionStrain: p.maxTensionStrain,
+        maxCompressionStrain: p.maxCompressionStrain,
+        tensionStiffness: p.tensionStiffness,
+        compressionStiffness: p.compressionStiffness,
+        broken: false,
+        preStrain: 0,
+        stressRatio: 0
+      });
+      return sticks.length - 1;
+    }
+
+    function resetSimulation(keepRunning = true) {
+      const wasRunning = running;
+      nodes = [];
+      sticks = [];
+      columns = [];
+      collapsed = false;
+      maxStressRatio = 0;
+      simTime = 0;
+      accumulator = 0;
+
+      const w = canvas.getBoundingClientRect().width || 900;
+      const h = canvas.getBoundingClientRect().height || 560;
+      const span = Math.min(320, w * 0.42);
+      const height = Math.min(260, h * 0.48);
+      const baseY = h * 0.72;
+      const leftX = w / 2 - span / 2;
+      const rightX = w / 2 + span / 2;
+      const topY = baseY - height;
+
+      const leftAnchor = addNode(leftX, baseY, true, '左地震アンカー');
+      const rightAnchor = addNode(rightX, baseY, true, '右地震アンカー');
+      const leftFoot = addNode(leftX, baseY, false, '左柱脚');
+      const rightFoot = addNode(rightX, baseY, false, '右柱脚');
+      const leftTop = addNode(leftX, topY, false, '左柱頭');
+      const rightTop = addNode(rightX, topY, false, '右柱頭');
+
+      const leftFoundation = addStick(leftAnchor, leftFoot, 'foundation', '左基礎');
+      const rightFoundation = addStick(rightAnchor, rightFoot, 'foundation', '右基礎');
+      const leftColumn = addStick(leftFoot, leftTop, 'pillar', '左柱');
+      const rightColumn = addStick(rightFoot, rightTop, 'pillar', '右柱');
+      addStick(leftTop, rightTop, 'beam', '梁');
+
+      columns.push({ foot: leftFoot, top: leftTop, stick: leftColumn, foundation: leftFoundation, height });
+      columns.push({ foot: rightFoot, top: rightTop, stick: rightColumn, foundation: rightFoundation, height });
+
+      if (currentPattern === 'single' || currentPattern === 'x') {
+        addStick(leftFoot, rightTop, 'brace', '筋交い');
+      }
+      if (currentPattern === 'x') {
+        // X字筋交いは交点ノードを作らず、2本の独立したスティックとして扱う。
+        addStick(rightFoot, leftTop, 'brace', '筋交い');
+      }
+
+      running = keepRunning ? wasRunning : running;
+      updateStatusPanel();
+      draw();
+    }
+
+    function applyVerlet(dt) {
+      // Verlet積分：前フレーム位置との差を速度として使い、固定されていない質点だけを更新する。
+      for (const node of nodes) {
+        if (node.fixed) continue;
+        const vx = (node.x - node.px) * DAMPING;
+        const vy = (node.y - node.py) * DAMPING;
+        node.px = node.x;
+        node.py = node.y;
+        node.x += vx;
+        node.y += vy + GRAVITY * dt * dt;
+      }
+    }
+
+    function applyEarthquake() {
+      // 地震入力：全質点に力を加えず、fixedな地震アンカーだけをsin波で左右に動かす。
+      const amplitude = Number(amplitudeSlider.value);
+      const frequency = Number(frequencySlider.value);
+      const offsetX = amplitude * Math.sin(2 * Math.PI * frequency * simTime);
+      for (const node of nodes) {
+        if (!node.fixed) continue;
+        node.x = node.baseX + offsetX;
+        node.y = node.baseY;
+        node.px = node.x;
+        node.py = node.y;
+      }
+    }
+
+    function computeStressBeforeConstraints() {
+      maxStressRatio = 0;
+      for (const stick of sticks) {
+        if (stick.broken) {
+          stick.stressRatio = 1.5;
+          continue;
+        }
+        const a = nodes[stick.a];
+        const b = nodes[stick.b];
+        const currentLength = Math.max(0.0001, distance(a, b));
+        // preStrainの計算：拘束解決後では負荷が隠れるため、解決前の予測ひずみを使う。
+        const preStrain = (currentLength - stick.restLength) / stick.restLength;
+        stick.preStrain = preStrain;
+        let ratio = preStrain >= 0
+          ? preStrain / stick.maxTensionStrain
+          : preStrain / stick.maxCompressionStrain;
+        stick.stressRatio = clamp(ratio, 0, 1.5);
+      }
+
+      for (const column of columns) {
+        const stick = sticks[column.stick];
+        if (stick.broken) continue;
+        const foot = nodes[column.foot];
+        const top = nodes[column.top];
+        const columnTilt = Math.abs(top.x - foot.x) / column.height;
+        const tiltRatio = columnTilt / COLLAPSE_TILT_THRESHOLD;
+        // 柱の傾きによる疑似応力：四角形が平行四辺形にゆがむ負担を色と倒壊判定に反映する。
+        stick.stressRatio = clamp(Math.max(stick.stressRatio, tiltRatio), 0, 1.5);
+        stick.columnTilt = columnTilt;
+      }
+
+      maxStressRatio = sticks.reduce((max, s) => s.broken ? max : Math.max(max, s.stressRatio), 0);
+    }
+
+    function breakOverloadedMembers() {
+      // 破断判定：foundation以外は拘束解決前のpreStrainが限界を超えたらbrokenにする。
+      for (const stick of sticks) {
+        if (stick.broken || stick.type === 'foundation') continue;
+        if (stick.preStrain > stick.maxTensionStrain || stick.preStrain < stick.maxCompressionStrain) {
+          stick.broken = true;
+        }
+      }
+
+      for (const column of columns) {
+        const foot = nodes[column.foot];
+        const top = nodes[column.top];
+        const columnTilt = Math.abs(top.x - foot.x) / column.height;
+        if (columnTilt > COLLAPSE_TILT_THRESHOLD) {
+          // 倒壊トリガー：地震アンカーのfixedは解除せず、対応する基礎拘束だけを破断させる。
+          sticks[column.foundation].broken = true;
+        }
+      }
+    }
+
+    function solveConstraints() {
+      // 拘束解決：brokenでないスティックだけを、自然長へ戻す距離拘束として反復補正する。
+      for (let iter = 0; iter < CONSTRAINT_ITERATIONS; iter++) {
+        for (const stick of sticks) {
+          if (stick.broken) continue;
+          const a = nodes[stick.a];
+          const b = nodes[stick.b];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist === 0) continue;
+          let diff = (dist - stick.restLength) / dist;
+          const isCompression = dist < stick.restLength;
+          const stiffness = isCompression ? stick.compressionStiffness : stick.tensionStiffness;
+          diff *= stiffness;
+          const offsetX = dx * diff;
+          const offsetY = dy * diff;
+
+          if (!a.fixed && !b.fixed) {
+            a.x += offsetX * 0.5;
+            a.y += offsetY * 0.5;
+            b.x -= offsetX * 0.5;
+            b.y -= offsetY * 0.5;
+          } else if (!a.fixed && b.fixed) {
+            a.x += offsetX;
+            a.y += offsetY;
+          } else if (a.fixed && !b.fixed) {
+            b.x -= offsetX;
+            b.y -= offsetY;
+          }
+        }
+      }
+    }
+
+    function updateCollapseState() {
+      // 倒壊判定：基礎拘束破断、過大な柱傾き、上部の落下、破断数の増加を総合して表示する。
+      const foundationBroken = sticks.some(s => s.type === 'foundation' && s.broken);
+      const anyColumnSevereTilt = columns.some(c => Math.abs(nodes[c.top].x - nodes[c.foot].x) / c.height > COLLAPSE_TILT_THRESHOLD * 1.15);
+      const topFallen = columns.some(c => nodes[c.top].y > nodes[c.foot].y - c.height * 0.45);
+      const brokenStructural = sticks.filter(s => s.type !== 'foundation' && s.broken).length;
+      collapsed = foundationBroken || anyColumnSevereTilt || topFallen || brokenStructural >= 3;
+    }
+
+    function step(dt) {
+      simTime += dt;
+      applyVerlet(dt);
+      applyEarthquake();
+      computeStressBeforeConstraints();
+      breakOverloadedMembers();
+      solveConstraints();
+      updateCollapseState();
+    }
+
+    function stressColor(ratio) {
+      const r = clamp(ratio, 0, 1);
+      if (r < 0.5) {
+        const t = r / 0.5;
+        return `rgb(${Math.round(25 + (243 - 25) * t)}, ${Math.round(168 + (198 - 168) * t)}, ${Math.round(74 + (35 - 74) * t)})`;
+      }
+      const t = (r - 0.5) / 0.5;
+      return `rgb(${Math.round(243 + (226 - 243) * t)}, ${Math.round(198 + (59 - 198) * t)}, ${Math.round(35 + (47 - 35) * t)})`;
+    }
+
+    function drawStick(stick) {
+      const a = nodes[stick.a];
+      const b = nodes[stick.b];
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineCap = 'round';
+      ctx.lineWidth = stick.type === 'brace' ? 7 : stick.type === 'foundation' ? 3 : 12;
+      ctx.strokeStyle = stick.broken ? 'rgba(140, 148, 158, 0.65)' : stressColor(stick.stressRatio);
+      if (stick.broken) ctx.setLineDash([10, 8]);
+      if (stick.type === 'foundation' && !stick.broken) ctx.strokeStyle = 'rgba(79, 116, 161, 0.35)';
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function draw() {
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = '#d4dee9';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < w; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      }
+      for (let y = 0; y < h; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+
+      const groundY = nodes[0]?.baseY || h * 0.72;
+      ctx.strokeStyle = '#6c7c8f';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(40, groundY + 18);
+      ctx.lineTo(w - 40, groundY + 18);
+      ctx.stroke();
+
+      for (const stick of sticks.filter(s => s.type === 'foundation')) drawStick(stick);
+      for (const stick of sticks.filter(s => s.type === 'brace')) drawStick(stick);
+      for (const stick of sticks.filter(s => s.type === 'pillar' || s.type === 'beam')) drawStick(stick);
+
+      for (const node of nodes) {
+        ctx.beginPath();
+        if (node.fixed) {
+          ctx.fillStyle = '#315c91';
+          ctx.fillRect(node.x - 10, node.y + 7, 20, 14);
+        } else {
+          ctx.fillStyle = '#20334d';
+          ctx.arc(node.x, node.y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      const offset = nodes[0] ? nodes[0].x - nodes[0].baseX : 0;
+      ctx.fillStyle = '#1d6fd6';
+      ctx.font = '700 14px system-ui, sans-serif';
+      ctx.fillText('地震の揺れ', 34, groundY - 20);
+      ctx.beginPath();
+      ctx.moveTo(125, groundY - 24);
+      ctx.lineTo(125 + offset, groundY - 24);
+      ctx.strokeStyle = '#1d6fd6';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.fillStyle = '#20334d';
+      ctx.font = '700 15px system-ui, sans-serif';
+      const labels = [
+        ['柱', nodes[4]?.x - 42, (nodes[4]?.y + nodes[2]?.y) / 2],
+        ['梁', (nodes[4]?.x + nodes[5]?.x) / 2 - 10, (nodes[4]?.y || 0) - 15],
+        ['基礎', (nodes[0]?.x + nodes[1]?.x) / 2 - 16, groundY + 48]
+      ];
+      if (currentPattern !== 'none') labels.push(['筋交い', w / 2 + 20, groundY - 115]);
+      for (const [text, x, y] of labels) {
+        if (Number.isFinite(x) && Number.isFinite(y)) ctx.fillText(text, x, y);
+      }
+    }
+
+    function updateStatusPanel() {
+      const brokenCount = sticks.filter(s => s.broken).length;
+      const status = collapsed ? '倒壊しました' : maxStressRatio >= 0.5 ? '注意' : '安定';
+      patternLabel.textContent = PATTERN_NAMES[currentPattern];
+      brokenCountEl.textContent = String(brokenCount);
+      maxStressEl.textContent = `${Math.round(clamp(maxStressRatio, 0, 1.5) * 100)}%`;
+      statusText.textContent = status;
+      statusText.className = 'status-text' + (collapsed ? ' collapsed' : maxStressRatio >= 0.5 ? ' caution' : '');
+    }
+
+    function animationLoop(now) {
+      resizeCanvasToDisplaySize();
+      const realDelta = Math.min((now - lastFrameTime) / 1000, 0.08);
+      lastFrameTime = now;
+      if (running) {
+        accumulator += realDelta * (slowMotion ? 0.28 : 1);
+        let steps = 0;
+        while (accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+          step(FIXED_DT);
+          accumulator -= FIXED_DT;
+          steps++;
+        }
+        if (steps === MAX_STEPS_PER_FRAME) accumulator = 0;
+      }
+      updateStatusPanel();
+      draw();
+      requestAnimationFrame(animationLoop);
+    }
+
+    document.querySelectorAll('input[name="pattern"]').forEach(input => {
+      input.addEventListener('change', () => {
+        currentPattern = input.value;
+        resetSimulation(false);
+      });
+    });
+
+    amplitudeSlider.addEventListener('input', () => {
+      amplitudeValue.textContent = `${amplitudeSlider.value} px`;
+    });
+    frequencySlider.addEventListener('input', () => {
+      frequencyValue.textContent = `${Number(frequencySlider.value).toFixed(1)} Hz`;
+    });
+    startBtn.addEventListener('click', () => { running = true; });
+    pauseBtn.addEventListener('click', () => { running = false; });
+    resetBtn.addEventListener('click', () => resetSimulation(false));
+    slowBtn.addEventListener('click', () => {
+      slowMotion = !slowMotion;
+      slowBtn.textContent = slowMotion ? 'スローON' : 'スローOFF';
+      slowBtn.classList.toggle('active', slowMotion);
+      slowBtn.classList.toggle('secondary', !slowMotion);
+    });
+    window.addEventListener('resize', resizeCanvasToDisplaySize);
+
+    resizeCanvasToDisplaySize();
+    resetSimulation(false);
+    requestAnimationFrame(animationLoop);
+  </script>
+</body>
+</html>
