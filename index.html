@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>日本家屋の耐震実験シミュレーター v0.5</title>
+    <title>日本家屋の耐震実験シミュレーター v0.6</title>
     <style>
       :root {
         color-scheme: light;
@@ -243,7 +243,7 @@
   <body>
     <header>
       <h1>
-        日本家屋の耐震実験シミュレーター v0.5<br /><span style="color: #1578d4"
+        日本家屋の耐震実験シミュレーター v0.6<br /><span style="color: #1578d4"
           >二階建ての弱い階と、筋交い配置の良し悪しを調べよう。</span
         >
       </h1>
@@ -255,7 +255,7 @@
       <section class="panel" aria-label="操作UI">
         <h2>編集と地震テスト</h2>
         <p class="notice">
-          このシミュレーターは教材用の簡易表現です。震度1でも長時間加振すると危険になる設定は、弱い構造と繰り返し揺れの影響を学ぶための表現です。実際の地震被害を厳密に再現するものではありません。
+          このシミュレーターは教材用の簡易表現です。震度・揺れ時間・ダメージは、構造の違いを比較するための疑似値です。実際の地震動や建物被害を厳密に再現するものではありません。震度1で長時間加振すると危険になる表現は、連続加振試験モードで弱い模型を揺らし続けた場合の教材用設定です。
         </p>
         <div class="control-group">
           <label for="shindoSelect">震度</label>
@@ -272,6 +272,16 @@
           </select>
           <p class="note">
             震度は教材用の簡易値です。内部では振幅・速さ・累積ダメージ率へ変換します。
+          </p>
+        </div>
+        <div class="control-group">
+          <label for="excitationModeSelect">揺れ方</label>
+          <select id="excitationModeSelect">
+            <option value="earthquake" selected>地震モード（時間波形）</option>
+            <option value="continuous">連続加振試験モード</option>
+          </select>
+          <p class="note">
+            地震モードは立ち上がり・主要動・減衰・終了を持つ波形です。連続加振は耐震実験用に同じ強さで揺らし続けます。
           </p>
         </div>
         <div class="buttons">
@@ -323,7 +333,16 @@
             <strong>現在の震度</strong><span id="shindoLabel">震度4</span>
           </div>
           <div class="metric">
+            <strong>モード</strong><span id="modeLabel">地震</span>
+          </div>
+          <div class="metric">
             <strong>経過時間</strong><span id="elapsedLabel">0.0 秒</span>
+          </div>
+          <div class="metric">
+            <strong>地震継続時間</strong><span id="durationLabel">28 秒</span>
+          </div>
+          <div class="metric">
+            <strong>残り時間</strong><span id="remainingLabel">28.0 秒</span>
           </div>
           <div class="metric">
             <strong>最大負荷</strong><span id="maxStress">0%</span>
@@ -354,6 +373,10 @@
           </div>
           <div>
             評価コメント<br /><span id="evalMessage">筋交いがありません。</span>
+          </div>
+          <div class="metric">
+            <strong>最終判定</strong
+            ><span id="finalJudgementLabel">未実施</span>
           </div>
           <div style="margin-top: 8px">
             状態<br /><span id="statusText" class="status-text">停止中</span>
@@ -407,7 +430,10 @@
       }
       const shindoSelect = getRequiredElement("shindoSelect"),
         shindoLabel = getRequiredElement("shindoLabel"),
+        modeLabel = getRequiredElement("modeLabel"),
         elapsedLabel = getRequiredElement("elapsedLabel"),
+        durationLabel = getRequiredElement("durationLabel"),
+        remainingLabel = getRequiredElement("remainingLabel"),
         maxStressEl = getRequiredElement("maxStress"),
         drift1Label = getRequiredElement("drift1Label"),
         drift2Label = getRequiredElement("drift2Label"),
@@ -418,8 +444,10 @@
         weakStoryLabel = getRequiredElement("weakStoryLabel"),
         brokenCountEl = getRequiredElement("brokenCount"),
         evalMessageEl = getRequiredElement("evalMessage"),
+        finalJudgementLabel = getRequiredElement("finalJudgementLabel"),
         statusText = getRequiredElement("statusText"),
         messageBox = getRequiredElement("messageBox");
+      const excitationModeSelect = getRequiredElement("excitationModeSelect");
       const editButton = getRequiredElement("editBtn"),
         undoBraceButton = getRequiredElement("undoBraceBtn"),
         clearBraceButton = getRequiredElement("clearBraceBtn"),
@@ -462,35 +490,78 @@
         MIN_COLLAPSE_TIME = 1.5,
         EPSILON = 1e-6;
       const SHINDO_PRESETS = {
-        1: { amplitude: 3, frequency: 0.75, impulse: 0.04, damageRate: 0.05 },
-        2: { amplitude: 6, frequency: 0.85, impulse: 0.07, damageRate: 0.09 },
-        3: { amplitude: 10, frequency: 1, impulse: 0.11, damageRate: 0.15 },
-        4: { amplitude: 16, frequency: 1.15, impulse: 0.17, damageRate: 0.24 },
+        1: {
+          amplitude: 3,
+          frequency: 0.75,
+          impulse: 0.04,
+          damageRate: 0.04,
+          duration: 20,
+          strongDuration: 4,
+        },
+        2: {
+          amplitude: 6,
+          frequency: 0.85,
+          impulse: 0.07,
+          damageRate: 0.07,
+          duration: 22,
+          strongDuration: 5,
+        },
+        3: {
+          amplitude: 10,
+          frequency: 1,
+          impulse: 0.11,
+          damageRate: 0.12,
+          duration: 25,
+          strongDuration: 7,
+        },
+        4: {
+          amplitude: 16,
+          frequency: 1.15,
+          impulse: 0.17,
+          damageRate: 0.2,
+          duration: 28,
+          strongDuration: 9,
+        },
         "5弱": {
           amplitude: 24,
           frequency: 1.3,
           impulse: 0.27,
-          damageRate: 0.4,
+          damageRate: 0.34,
+          duration: 32,
+          strongDuration: 12,
         },
         "5強": {
           amplitude: 34,
           frequency: 1.45,
           impulse: 0.4,
-          damageRate: 0.58,
+          damageRate: 0.5,
+          duration: 36,
+          strongDuration: 15,
         },
         "6弱": {
           amplitude: 45,
           frequency: 1.6,
           impulse: 0.54,
-          damageRate: 0.78,
+          damageRate: 0.72,
+          duration: 42,
+          strongDuration: 18,
         },
         "6強": {
           amplitude: 56,
           frequency: 1.75,
           impulse: 0.68,
-          damageRate: 0.98,
+          damageRate: 0.94,
+          duration: 48,
+          strongDuration: 22,
         },
-        7: { amplitude: 70, frequency: 1.9, impulse: 0.86, damageRate: 1.25 },
+        7: {
+          amplitude: 70,
+          frequency: 1.9,
+          impulse: 0.86,
+          damageRate: 1.2,
+          duration: 60,
+          strongDuration: 28,
+        },
       };
       let nodes = [],
         sticks = [],
@@ -503,6 +574,10 @@
         slowMotion = false,
         collapsed = false,
         currentShindo = "4",
+        excitationMode = "earthquake",
+        quakeEnded = false,
+        currentExcitationLevel = 0,
+        finalJudgement = "未実施",
         elapsedTime = 0,
         quakeTime = 0,
         groundOffsetX = 0,
@@ -868,6 +943,10 @@
       function resetSimulation() {
         running = false;
         collapsed = false;
+        quakeEnded = false;
+        currentExcitationLevel = 0;
+        finalJudgement = "未実施";
+        excitationMode = excitationModeSelect.value;
         elapsedTime = 0;
         quakeTime = 0;
         groundOffsetX = 0;
@@ -903,14 +982,35 @@
         startButton.textContent = "開始";
         updateStatusPanel();
       }
+      function smoothstep(edge0, edge1, x) {
+        const t = clamp((x - edge0) / Math.max(EPSILON, edge1 - edge0), 0, 1);
+        return t * t * (3 - 2 * t);
+      }
+      function quakeEnvelope(t, preset) {
+        // 地震モードでは、立ち上がり→主要動→減衰→終了という包絡線を使う。
+        const attack = 2.0;
+        const strong = preset.strongDuration || 8;
+        const total = preset.duration || 30;
+        const decayStart = attack + strong;
+        if (t < 0) return 0;
+        if (t < attack) return smoothstep(0, attack, t);
+        if (t < decayStart) return 1;
+        if (t < total) {
+          const k = 1 - smoothstep(decayStart, total, t);
+          return Math.max(0.08, k);
+        }
+        return 0;
+      }
       function getQuakeOffset(t) {
-        const p = SHINDO_PRESETS[currentShindo];
-        return (
-          p.amplitude *
-          (Math.sin(2 * Math.PI * p.frequency * t) +
-            0.3 * Math.sin(2 * Math.PI * p.frequency * 1.65 * t + 0.8) +
-            0.14 * Math.sin(2 * Math.PI * p.frequency * 0.42 * t + 1.7))
-        );
+        const p = SHINDO_PRESETS[currentShindo] || SHINDO_PRESETS[4];
+        const env = excitationMode === "continuous" ? 1 : quakeEnvelope(t, p);
+        currentExcitationLevel = env;
+        if (env <= 0) return 0;
+        const wave =
+          Math.sin(2 * Math.PI * p.frequency * t) +
+          0.32 * Math.sin(2 * Math.PI * p.frequency * 1.7 * t + 0.8) +
+          0.18 * Math.sin(2 * Math.PI * p.frequency * 0.43 * t + 1.7);
+        return p.amplitude * env * wave;
       }
       function applyVerlet(dt) {
         for (const n of nodes) {
@@ -929,9 +1029,15 @@
           quakeTime += dt;
           previousGroundOffsetX = groundOffsetX;
           groundOffsetX = getQuakeOffset(quakeTime);
+          if (excitationMode === "earthquake" && quakeTime >= p.duration) {
+            quakeEnded = true;
+            groundOffsetX = 0;
+            currentExcitationLevel = 0;
+          }
         } else {
           previousGroundOffsetX = 0;
           groundOffsetX = 0;
+          currentExcitationLevel = 0;
         }
         for (const n of nodes)
           if (n.fixed) {
@@ -940,7 +1046,7 @@
             n.px = n.x;
             n.py = n.y;
           }
-        if (running && !collapsed) {
+        if (running && !collapsed && currentExcitationLevel > 0) {
           const delta = groundOffsetX - previousGroundOffsetX;
           for (const n of nodes) {
             if (n.fixed) continue;
@@ -1035,6 +1141,32 @@
           else cell.backslash++;
         }
       }
+      function evaluateDirectionBalanceByFloorAndSpan(grid) {
+        // 各階・各スパンでX字か片筋交いかを点数化する。1階の補強を重く評価する。
+        const floors = [
+          { key: "floor1", weight: 1.4 },
+          { key: "floor2", weight: 1.0 },
+        ];
+        let weightedScore = 0;
+        let maxScore = 0;
+        let xCount = 0;
+        let oneWayCount = 0;
+        for (const floor of floors) {
+          for (const cell of grid[floor.key]) {
+            const cellScore =
+              cell.slash && cell.backslash ? 2.0 : cell.count > 0 ? 0.8 : 0;
+            if (cell.slash && cell.backslash) xCount++;
+            else if (cell.count > 0) oneWayCount++;
+            weightedScore += cellScore * floor.weight;
+            maxScore += 2.0 * floor.weight;
+          }
+        }
+        return {
+          score: maxScore > 0 ? weightedScore / maxScore : 0,
+          xCount,
+          oneWayCount,
+        };
+      }
       function evaluateBraceLayout() {
         computeBraceGrid();
         const f1 = braceGrid.floor1,
@@ -1046,18 +1178,38 @@
           evaluation = {
             grade: "危険",
             weakStory: "1階",
-            balancePenalty: 1.7,
-            weakStoryPenalty: 2.05,
-            directionPenalty: 1.25,
-            loadPathPenalty: 1.35,
+            balancePenalty: 1.85,
+            weakStoryPenalty: 2.35,
+            directionPenalty: 1.45,
+            loadPathPenalty: 1.55,
+            floor1Penalty: 2.55,
+            floor2Penalty: 1.75,
+            xCount: 0,
+            directionScore: 0,
             message: "筋交いがありません。1階から大きく変形しやすいです。",
           };
           return evaluation;
         }
         const occupied1 = f1.map((c) => c.count > 0),
           occupied2 = f2.map((c) => c.count > 0);
-        let weakStoryPenalty = count1 === 0 ? 2.0 : count2 === 0 ? 1.25 : 1.0;
-        let weakStory = count1 === 0 ? "1階" : count2 === 0 ? "2階" : "なし";
+        const dir = evaluateDirectionBalanceByFloorAndSpan(braceGrid);
+        let weakStory = "なし";
+        let weakStoryPenalty = 1.0;
+        let floor1Penalty = 1.0;
+        let floor2Penalty = 1.0;
+        if (count1 === 0) {
+          weakStory = "1階";
+          weakStoryPenalty = 2.35;
+          floor1Penalty += 1.5;
+        } else if (count1 < 3) {
+          weakStory = "1階";
+          weakStoryPenalty = 1.55;
+          floor1Penalty += 0.8;
+        }
+        if (count2 === 0) {
+          if (weakStory === "なし") weakStory = "2階";
+          floor2Penalty += 0.65;
+        }
         const cols = [0, 0, 0, 0];
         for (const b of userBraces) {
           cols[b.span]++;
@@ -1065,51 +1217,84 @@
         }
         const left = cols[0] + cols[1],
           right = cols[2] + cols[3],
-          balancePenalty =
-            Math.abs(left - right) >= 3
-              ? 1.45
-              : Math.abs(left - right) >= 2
-                ? 1.25
-                : 1.0;
+          sideDiff = Math.abs(left - right);
+        const balancePenalty =
+          sideDiff >= 4 ? 1.65 : sideDiff >= 2 ? 1.38 : 1.0;
+        if (balancePenalty > 1.1) {
+          floor1Penalty += 0.5;
+          floor2Penalty += 0.3;
+        }
         const slash = userBraces.filter((b) => b.direction === "/").length,
           back = userBraces.length - slash;
-        const directionPenalty =
-          slash === 0 || back === 0
-            ? 1.3
-            : Math.abs(slash - back) >= 4
-              ? 1.18
+        const oneDirectionOnly = slash === 0 || back === 0;
+        const directionPenalty = oneDirectionOnly
+          ? 1.65
+          : Math.abs(slash - back) >= 4 || dir.score < 0.45
+            ? 1.42
+            : dir.oneWayCount > dir.xCount
+              ? 1.25
               : 1.0;
+        if (directionPenalty > 1.1) {
+          floor1Penalty += 0.4;
+          floor2Penalty += 0.4;
+        }
         let loadPathPenalty = 1.0;
-        for (let i = 0; i < 3; i++)
-          if (occupied1[i] !== occupied2[i]) loadPathPenalty += 0.12;
-        const xCount = [...f1, ...f2].filter(
-          (c) => c.slash && c.backslash,
-        ).length;
-        let score =
-          total * 12 +
-          xCount * 9 -
-          (weakStoryPenalty - 1) * 35 -
-          (balancePenalty - 1) * 30 -
-          (directionPenalty - 1) * 22 -
-          (loadPathPenalty - 1) * 25;
-        let grade = "普通",
-          message = "補強はありますが、配置をもう少し整えると安定します。";
+        let disconnected = 0;
+        for (let i = 0; i < 3; i++) {
+          if (occupied1[i] !== occupied2[i]) disconnected++;
+        }
+        loadPathPenalty += disconnected * 0.18;
+        if (disconnected) floor1Penalty += 0.4;
+        const centerOnly = cols[1] + cols[2] > 0 && cols[0] + cols[3] === 0;
+        const edgeOnly = cols[0] + cols[3] > 0 && cols[1] + cols[2] === 0;
+        if (centerOnly || edgeOnly) {
+          floor1Penalty += 0.35;
+          floor2Penalty += 0.2;
+        }
+        if (dir.xCount < 2) {
+          floor1Penalty += 0.3;
+          floor2Penalty += 0.3;
+        }
+        const score =
+          total * 8 +
+          dir.xCount * 12 +
+          dir.score * 36 -
+          (weakStoryPenalty - 1) * 34 -
+          (balancePenalty - 1) * 34 -
+          (directionPenalty - 1) * 34 -
+          (loadPathPenalty - 1) * 28;
+        let grade = "普通";
+        let message =
+          "補強はありますが、X字や上下階の連続性を増やすと安定します。";
         if (count1 === 0) {
           grade = "悪い";
           message = "2階だけ補強されています。1階が弱いです。";
         } else if (balancePenalty > 1.2) {
           grade = "悪い";
           message = "補強が左右どちらかに偏っています。";
-        } else if (directionPenalty > 1.15) {
+        } else if (directionPenalty >= 1.42) {
+          grade = "悪い";
+          message = "片方向の筋交いが多く、揺れの向きによって弱くなります。";
+        } else if (
+          directionPenalty > 1.1 ||
+          dir.xCount < 3 ||
+          loadPathPenalty > 1.18
+        ) {
           grade = "普通";
           message =
-            "片方向の筋交いが多めです。X字にすると揺れの両方向に効きます。";
-        } else if (score >= 78 && count1 >= 4 && count2 >= 4 && xCount >= 3) {
+            "片筋交いや上下階のズレがあります。震度6弱では危険に近づきやすい配置です。";
+        } else if (
+          score >= 86 &&
+          count1 >= 4 &&
+          count2 >= 4 &&
+          dir.xCount >= 4 &&
+          balancePenalty === 1.0
+        ) {
           grade = "良い";
           message = "1階と2階に左右バランスよくX字筋交いがあります。";
-        } else if (score < 35) {
+        } else if (score < 40) {
           grade = "悪い";
-          message = "筋交いはありますが、弱い階または偏りがあります。";
+          message = "筋交いはありますが、弱い階・偏り・連続性不足があります。";
         }
         evaluation = {
           grade,
@@ -1118,6 +1303,10 @@
           weakStoryPenalty,
           directionPenalty,
           loadPathPenalty,
+          floor1Penalty: clamp(floor1Penalty, 1, 3.2),
+          floor2Penalty: clamp(floor2Penalty, 1, 2.6),
+          xCount: dir.xCount,
+          directionScore: dir.score,
           message,
         };
         return evaluation;
@@ -1126,25 +1315,26 @@
         const p = SHINDO_PRESETS[currentShindo];
         evaluateBraceLayout();
         const noBraces = userBraces.length === 0;
-        const f1Penalty =
-          evaluation.weakStory === "1階" ? evaluation.weakStoryPenalty : 1;
-        const f2Penalty = evaluation.weakStory === "2階" ? 1.45 : 1;
-        const common =
-          evaluation.balancePenalty *
-          evaluation.directionPenalty *
-          evaluation.loadPathPenalty;
-        const fatigue = noBraces ? 0.3 : 0.035;
+        const excitation =
+          excitationMode === "continuous" ? 1 : currentExcitationLevel;
+        if (excitation <= 0 && excitationMode === "earthquake") return;
+        const floor1Penalty = evaluation.floor1Penalty || 1;
+        const floor2Penalty = evaluation.floor2Penalty || 1;
+        const fatigue = noBraces
+          ? 0.22 * excitation
+          : (evaluation.grade === "悪い" ? 0.055 : 0.025) * excitation;
+        const stressDamage = Math.max(0, maxStressRatio - 0.35) * 0.45;
         storyDamage.floor1 +=
-          (storyDrift.floor1 * 3.8 + fatigue) *
+          (storyDrift.floor1 * 4.4 + stressDamage + fatigue) *
           p.damageRate *
-          common *
-          f1Penalty *
+          floor1Penalty *
           dt;
         storyDamage.floor2 +=
-          (storyDrift.floor2 * 3.2 + (noBraces ? 0.16 : 0.025)) *
+          (storyDrift.floor2 * 3.7 +
+            stressDamage * 0.75 +
+            (noBraces ? 0.12 : fatigue * 0.55)) *
           p.damageRate *
-          common *
-          f2Penalty *
+          floor2Penalty *
           dt;
         if (evaluation.grade === "良い") {
           storyDamage.floor1 *= 1 - 0.018 * dt;
@@ -1632,11 +1822,21 @@
         ctx.save();
         ctx.fillStyle = "#1578d4";
         ctx.font = "900 17px system-ui,sans-serif";
-        ctx.fillText(`震度${currentShindo}`, 28, 34);
+        ctx.fillText(
+          `震度${currentShindo} / ${excitationMode === "earthquake" ? "地震波形" : "連続加振"}`,
+          28,
+          34,
+        );
         ctx.font = "700 13px system-ui,sans-serif";
         ctx.fillStyle = "#5a6b80";
         ctx.fillText(
-          running ? "加振台が左右に揺れています" : "停止中：地震入力なし",
+          quakeEnded && excitationMode === "earthquake"
+            ? "地震終了：揺れは停止、残った変形とダメージを表示中"
+            : running
+              ? excitationMode === "continuous"
+                ? "連続加振試験中"
+                : "地震波形：立ち上がり・主要動・減衰"
+              : "停止中：地震入力なし",
           28,
           55,
         );
@@ -1824,21 +2024,40 @@
         const broken = sticks.filter(
           (s) => s.broken && isStructuralStick(s),
         ).length;
+        const liveRisk =
+          storyDamage.floor1 >= 0.85 ||
+          storyDamage.floor2 >= 0.85 ||
+          maxStressRatio >= 1
+            ? "危険"
+            : storyDamage.floor1 >= 0.45 ||
+                storyDamage.floor2 >= 0.45 ||
+                maxStressRatio >= 0.5
+              ? "注意"
+              : "安定";
         const status = collapsed
           ? "倒壊"
-          : !running
-            ? "停止中"
-            : storyDamage.floor1 >= 0.85 ||
-                storyDamage.floor2 >= 0.85 ||
-                maxStressRatio >= 1
-              ? "危険"
-              : storyDamage.floor1 >= 0.45 ||
-                  storyDamage.floor2 >= 0.45 ||
-                  maxStressRatio >= 0.5
-                ? "注意"
-                : "安定";
+          : quakeEnded && excitationMode === "earthquake"
+            ? "地震終了"
+            : !running
+              ? "停止中"
+              : liveRisk;
+        if (quakeEnded && excitationMode === "earthquake" && !collapsed) {
+          finalJudgement = liveRisk;
+        }
+        const preset = SHINDO_PRESETS[currentShindo] || SHINDO_PRESETS[4];
+        const remaining =
+          excitationMode === "earthquake"
+            ? Math.max(0, preset.duration - quakeTime)
+            : Infinity;
         shindoLabel.textContent = `震度${currentShindo}`;
+        modeLabel.textContent =
+          excitationMode === "earthquake" ? "地震" : "連続加振";
         elapsedLabel.textContent = `${elapsedTime.toFixed(1)} 秒`;
+        durationLabel.textContent =
+          excitationMode === "earthquake" ? `${preset.duration} 秒` : "継続";
+        remainingLabel.textContent = Number.isFinite(remaining)
+          ? `${remaining.toFixed(1)} 秒`
+          : "--";
         maxStressEl.textContent = `${Math.round(clamp(maxStressRatio, 0, 1.5) * 100)}%`;
         drift1Label.textContent = `${(storyDrift.floor1 * 100).toFixed(1)}%`;
         drift2Label.textContent = `${(storyDrift.floor2 * 100).toFixed(1)}%`;
@@ -1849,6 +2068,7 @@
         weakStoryLabel.textContent = evaluation.weakStory;
         brokenCountEl.textContent = String(broken);
         evalMessageEl.textContent = evaluation.message;
+        finalJudgementLabel.textContent = collapsed ? "倒壊" : finalJudgement;
         statusText.textContent = status;
         statusText.className =
           "status-text" +
@@ -1860,7 +2080,9 @@
                 ? " danger"
                 : status === "注意"
                   ? " caution"
-                  : " stable");
+                  : status === "地震終了"
+                    ? " stable"
+                    : " stable");
       }
 
       function computeStructuralMetrics() {
@@ -1896,11 +2118,22 @@
         return list;
       }
 
-      async function simulateAcceptanceCase({ name, shindo, braces, seconds }) {
+      async function simulateAcceptanceCase({
+        name,
+        shindo,
+        braces,
+        seconds,
+        mode = "earthquake",
+      }) {
         currentShindo = shindo;
+        excitationMode = mode;
+        if (excitationModeSelect) excitationModeSelect.value = mode;
         setBraces(braces);
         running = true;
         collapsed = false;
+        quakeEnded = false;
+        currentExcitationLevel = 0;
+        finalJudgement = "未実施";
         startButton.textContent = "開始中";
         const steps = Math.round(seconds / FIXED_DT);
         let firstDangerAt = null;
@@ -1978,6 +2211,7 @@
         const savedShindo = currentShindo;
         const savedSlow = slowMotion;
         const savedEdit = editMode;
+        const savedMode = excitationMode;
         testResultsEl.style.display = "block";
         testResultsEl.textContent = "内部テストを実行中...";
         if (testButton) testButton.disabled = true;
@@ -2030,6 +2264,7 @@
               shindo: "1",
               braces: [],
               seconds: 60,
+              mode: "continuous",
             },
           };
           const results = {};
@@ -2056,6 +2291,8 @@
           userBraces = savedBraces;
           currentShindo = savedShindo;
           shindoSelect.value = savedShindo;
+          excitationMode = savedMode;
+          excitationModeSelect.value = savedMode;
           slowMotion = savedSlow;
           editMode = savedEdit;
           resetSimulation();
@@ -2143,6 +2380,15 @@
             resetSimulation();
           },
           "震度選択",
+        );
+        safeAddEventListener(
+          excitationModeSelect,
+          "change",
+          () => {
+            excitationMode = excitationModeSelect.value;
+            resetSimulation();
+          },
+          "揺れ方選択",
         );
         safeAddEventListener(
           startButton,
