@@ -34,7 +34,7 @@
         background: radial-gradient(circle at top, #fffaf0 0%, var(--bg) 72%);
       }
       header {
-        padding: 18px clamp(16px, 3vw, 34px) 12px;
+        padding: 10px clamp(14px, 2.4vw, 28px) 8px;
         border-bottom: 1px solid var(--line);
         background: rgba(255, 253, 248, 0.96);
       }
@@ -54,7 +54,9 @@
         display: grid;
         grid-template-columns: minmax(270px, 335px) 1fr minmax(270px, 335px);
         gap: 14px;
-        padding: 14px clamp(12px, 2vw, 24px) 20px;
+        height: calc(100vh - 96px);
+        overflow: hidden;
+        padding: 10px clamp(10px, 1.6vw, 18px) 12px;
         max-width: 1540px;
         margin: 0 auto;
       }
@@ -125,8 +127,8 @@
       canvas {
         display: block;
         width: 100%;
-        height: min(68vh, 720px);
-        min-height: 500px;
+        height: min(calc(100vh - 150px), 720px);
+        min-height: 460px;
         border-radius: 14px;
         border: 1px solid var(--line);
         background: #f9f5ec;
@@ -286,7 +288,9 @@
         </div>
         <div class="buttons">
           <button id="pauseBtn" class="secondary">一時停止</button
-          ><button id="slowBtn" class="secondary">スローOFF</button>
+          ><button id="slowBtn" class="secondary">スローOFF</button
+          ><button id="testBtn" class="secondary">内部テスト実行</button
+          ><button id="toggleTestBtn" class="secondary">テスト結果表示</button>
         </div>
         <div id="messageBox" class="message">
           筋交いを入れたい2点をクリックしてください。筋交いは1つの階・1つのスパンの対角線だけに入れられます。
@@ -376,40 +380,78 @@
     </main>
     <script>
       "use strict";
-      const canvas = document.getElementById("simCanvas");
+      // v0.5でCanvasが空白になる典型原因:
+      // HTMLに存在しないDOMへaddEventListenerすると初期化が途中停止する。
+      // この修正版では内部テストボタンをHTMLに用意し、イベント登録もnull安全にする。
+      function getRequiredElement(id) {
+        const el = document.getElementById(id);
+        if (!el) throw new Error(`必須DOM要素が見つかりません: #${id}`);
+        return el;
+      }
+      function getOptionalElement(id) {
+        return document.getElementById(id);
+      }
+      function safeAddEventListener(el, eventName, handler, label) {
+        if (!el) {
+          console.warn(`イベント登録をスキップしました: ${label}`);
+          return;
+        }
+        el.addEventListener(eventName, handler);
+      }
+      const canvas = getRequiredElement("simCanvas");
       const ctx = canvas.getContext("2d");
-      const shindoSelect = document.getElementById("shindoSelect"),
-        shindoLabel = document.getElementById("shindoLabel"),
-        elapsedLabel = document.getElementById("elapsedLabel"),
-        maxStressEl = document.getElementById("maxStress"),
-        drift1Label = document.getElementById("drift1Label"),
-        drift2Label = document.getElementById("drift2Label"),
-        damage1Label = document.getElementById("damage1Label"),
-        damage2Label = document.getElementById("damage2Label"),
-        braceCountEl = document.getElementById("braceCount"),
-        gradeLabel = document.getElementById("gradeLabel"),
-        weakStoryLabel = document.getElementById("weakStoryLabel"),
-        brokenCountEl = document.getElementById("brokenCount"),
-        evalMessageEl = document.getElementById("evalMessage"),
-        statusText = document.getElementById("statusText"),
-        messageBox = document.getElementById("messageBox");
-      const editButton = document.getElementById("editBtn"),
-        undoBraceButton = document.getElementById("undoBraceBtn"),
-        clearBraceButton = document.getElementById("clearBraceBtn"),
-        recommendButton = document.getElementById("recommendBtn"),
-        badSecondButton = document.getElementById("badSecondBtn"),
-        badSideButton = document.getElementById("badSideBtn"),
-        startButton = document.getElementById("startBtn"),
-        pauseButton = document.getElementById("pauseBtn"),
-        resetButton = document.getElementById("resetBtn"),
-        slowButton = document.getElementById("slowBtn"),
-        testButton = document.getElementById("testBtn"),
-        toggleTestButton = document.getElementById("toggleTestBtn"),
-        testResultsEl = document.getElementById("testResults");
-      if (!canvas || !ctx) {
+      if (!ctx) {
         throw new Error(
-          "Canvas 2D コンテキストを取得できません。ブラウザ環境を確認してください。",
+          "Canvas 2D contextを取得できません。ブラウザ環境を確認してください。",
         );
+      }
+      const shindoSelect = getRequiredElement("shindoSelect"),
+        shindoLabel = getRequiredElement("shindoLabel"),
+        elapsedLabel = getRequiredElement("elapsedLabel"),
+        maxStressEl = getRequiredElement("maxStress"),
+        drift1Label = getRequiredElement("drift1Label"),
+        drift2Label = getRequiredElement("drift2Label"),
+        damage1Label = getRequiredElement("damage1Label"),
+        damage2Label = getRequiredElement("damage2Label"),
+        braceCountEl = getRequiredElement("braceCount"),
+        gradeLabel = getRequiredElement("gradeLabel"),
+        weakStoryLabel = getRequiredElement("weakStoryLabel"),
+        brokenCountEl = getRequiredElement("brokenCount"),
+        evalMessageEl = getRequiredElement("evalMessage"),
+        statusText = getRequiredElement("statusText"),
+        messageBox = getRequiredElement("messageBox");
+      const editButton = getRequiredElement("editBtn"),
+        undoBraceButton = getRequiredElement("undoBraceBtn"),
+        clearBraceButton = getRequiredElement("clearBraceBtn"),
+        recommendButton = getRequiredElement("recommendBtn"),
+        badSecondButton = getRequiredElement("badSecondBtn"),
+        badSideButton = getRequiredElement("badSideBtn"),
+        startButton = getRequiredElement("startBtn"),
+        pauseButton = getRequiredElement("pauseBtn"),
+        resetButton = getRequiredElement("resetBtn"),
+        slowButton = getRequiredElement("slowBtn"),
+        testButton = getOptionalElement("testBtn"),
+        toggleTestButton = getOptionalElement("toggleTestBtn"),
+        testResultsEl = getOptionalElement("testResults");
+      function showFatalError(error) {
+        console.error(error);
+        const target = document.getElementById("messageBox");
+        if (target) target.textContent = `起動エラー: ${error.message}`;
+        const fallbackCanvas = document.getElementById("simCanvas");
+        const fallbackCtx = fallbackCanvas
+          ? fallbackCanvas.getContext("2d")
+          : null;
+        if (fallbackCanvas && fallbackCtx) {
+          const rect = fallbackCanvas.getBoundingClientRect();
+          fallbackCtx.clearRect(0, 0, rect.width, rect.height);
+          fallbackCtx.fillStyle = "#fff0f0";
+          fallbackCtx.fillRect(0, 0, rect.width, rect.height);
+          fallbackCtx.fillStyle = "#b00020";
+          fallbackCtx.font = "bold 18px system-ui";
+          fallbackCtx.fillText("起動エラーが発生しました", 24, 40);
+          fallbackCtx.font = "14px system-ui";
+          fallbackCtx.fillText(error.message, 24, 70);
+        }
       }
       const FIXED_DT = 1 / 60,
         MAX_STEPS_PER_FRAME = 5,
@@ -809,6 +851,20 @@
       function hasBraceKey(key) {
         return userBraces.some((b) => b.key === key);
       }
+      function validateStructureBuilt() {
+        if (!Array.isArray(nodes) || nodes.length === 0) {
+          throw new Error("構造ノードが生成されていません");
+        }
+        if (!Array.isArray(sticks) || sticks.length === 0) {
+          throw new Error("構造部材が生成されていません");
+        }
+        if (
+          !Number.isFinite(modelBounds.baseY) ||
+          !Number.isFinite(modelBounds.roofBeamY)
+        ) {
+          throw new Error("modelBoundsが不正です");
+        }
+      }
       function resetSimulation() {
         running = false;
         collapsed = false;
@@ -821,6 +877,7 @@
         storyDamage = { floor1: 0, floor2: 0 };
         storyDrift = { floor1: 0, floor2: 0, total: 0 };
         buildStructure();
+        validateStructureBuilt();
         startButton.textContent = "開始";
         updateStatusPanel();
         draw();
@@ -1923,6 +1980,7 @@
         const savedEdit = editMode;
         testResultsEl.style.display = "block";
         testResultsEl.textContent = "内部テストを実行中...";
+        if (testButton) testButton.disabled = true;
         try {
           const cases = {
             A: {
@@ -2001,6 +2059,7 @@
           slowMotion = savedSlow;
           editMode = savedEdit;
           resetSimulation();
+          if (testButton) testButton.disabled = false;
         }
       }
 
@@ -2028,52 +2087,153 @@
       }
       function initApp() {
         // 初期化・UIイベント登録は一度だけ行い、requestAnimationFrameの増殖を防ぐ。
-        editButton.addEventListener("click", () => {
-          editMode = !editMode;
-          selectedNodeId = null;
-          editButton.textContent = editMode ? "筋交い追加ON" : "筋交い追加OFF";
-          editButton.classList.toggle("active", editMode);
-          setMessage(
-            editMode
-              ? "筋交いを入れたい2点をクリックしてください。"
-              : "筋交い追加モードをOFFにしました。",
-          );
-        });
-        undoBraceButton.addEventListener("click", undoLastBrace);
-        clearBraceButton.addEventListener("click", clearUserBraces);
-        recommendButton.addEventListener("click", addRecommendedBraces);
-        badSecondButton.addEventListener("click", addBadSecondStory);
-        badSideButton.addEventListener("click", addBadSide);
-        shindoSelect.addEventListener("change", () => {
-          currentShindo = shindoSelect.value;
-          resetSimulation();
-        });
-        startButton.addEventListener("click", startSimulation);
-        pauseButton.addEventListener("click", pauseSimulation);
-        resetButton.addEventListener("click", resetSimulation);
-        slowButton.addEventListener("click", () => {
-          slowMotion = !slowMotion;
-          slowButton.textContent = slowMotion ? "スローON" : "スローOFF";
-          slowButton.classList.toggle("active", slowMotion);
-        });
-        testButton.addEventListener("click", () => {
-          runAcceptanceTests();
-        });
-        toggleTestButton.addEventListener("click", () => {
-          testResultsEl.style.display =
-            testResultsEl.style.display === "none" ? "block" : "none";
-        });
-        canvas.addEventListener("click", handleCanvasClick);
-        canvas.addEventListener("mousemove", handleCanvasMove);
-        canvas.addEventListener("mouseleave", () => {
-          hoverNodeId = null;
-        });
-        window.addEventListener("resize", resizeCanvasToDisplaySize);
+        safeAddEventListener(
+          editButton,
+          "click",
+          () => {
+            editMode = !editMode;
+            selectedNodeId = null;
+            editButton.textContent = editMode
+              ? "筋交い追加ON"
+              : "筋交い追加OFF";
+            editButton.classList.toggle("active", editMode);
+            setMessage(
+              editMode
+                ? "筋交いを入れたい2点をクリックしてください。"
+                : "筋交い追加モードをOFFにしました。",
+            );
+          },
+          "筋交い追加ボタン",
+        );
+        safeAddEventListener(
+          undoBraceButton,
+          "click",
+          undoLastBrace,
+          "筋交い取り消しボタン",
+        );
+        safeAddEventListener(
+          clearBraceButton,
+          "click",
+          clearUserBraces,
+          "筋交い全消去ボタン",
+        );
+        safeAddEventListener(
+          recommendButton,
+          "click",
+          addRecommendedBraces,
+          "良い配置ボタン",
+        );
+        safeAddEventListener(
+          badSecondButton,
+          "click",
+          addBadSecondStory,
+          "2階だけ配置ボタン",
+        );
+        safeAddEventListener(
+          badSideButton,
+          "click",
+          addBadSide,
+          "片側だけ配置ボタン",
+        );
+        safeAddEventListener(
+          shindoSelect,
+          "change",
+          () => {
+            currentShindo = shindoSelect.value;
+            resetSimulation();
+          },
+          "震度選択",
+        );
+        safeAddEventListener(
+          startButton,
+          "click",
+          startSimulation,
+          "開始ボタン",
+        );
+        safeAddEventListener(
+          pauseButton,
+          "click",
+          pauseSimulation,
+          "一時停止ボタン",
+        );
+        safeAddEventListener(
+          resetButton,
+          "click",
+          resetSimulation,
+          "リセットボタン",
+        );
+        safeAddEventListener(
+          slowButton,
+          "click",
+          () => {
+            slowMotion = !slowMotion;
+            slowButton.textContent = slowMotion ? "スローON" : "スローOFF";
+            slowButton.classList.toggle("active", slowMotion);
+          },
+          "スローボタン",
+        );
+        safeAddEventListener(
+          testButton,
+          "click",
+          async () => {
+            await runAcceptanceTests();
+          },
+          "内部テストボタン",
+        );
+        safeAddEventListener(
+          toggleTestButton,
+          "click",
+          () => {
+            testResultsEl.style.display =
+              testResultsEl.style.display === "none" ? "block" : "none";
+          },
+          "テスト結果表示ボタン",
+        );
+        safeAddEventListener(
+          canvas,
+          "click",
+          handleCanvasClick,
+          "Canvasクリック",
+        );
+        safeAddEventListener(
+          canvas,
+          "mousemove",
+          handleCanvasMove,
+          "Canvasマウス移動",
+        );
+        safeAddEventListener(
+          canvas,
+          "mouseleave",
+          () => {
+            hoverNodeId = null;
+          },
+          "Canvasマウス離脱",
+        );
+        safeAddEventListener(
+          window,
+          "resize",
+          resizeCanvasToDisplaySize,
+          "resize",
+        );
         resizeCanvasToDisplaySize();
         resetSimulation();
         requestAnimationFrame(animationLoop);
       }
-      initApp();
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => {
+          try {
+            initApp();
+          } catch (error) {
+            showFatalError(error);
+          }
+        });
+      } else {
+        try {
+          initApp();
+        } catch (error) {
+          showFatalError(error);
+        }
+      }
     </script>
   </body>
 </html>
