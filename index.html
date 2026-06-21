@@ -159,6 +159,7 @@
     }
 
     .status-text.caution { background: var(--warning); }
+    .status-text.danger { background: #d76b00; }
     .status-text.collapsed { background: var(--danger); }
 
     .metric {
@@ -287,6 +288,7 @@
     const DAMPING = 0.985;
     const GRAVITY = 900;
     const COLLAPSE_TILT_THRESHOLD = 0.4;
+    const EPSILON = 1e-6;
     const PATTERN_NAMES = { none: '筋交いなし', single: '片筋交い', x: 'X字筋交い' };
 
     let nodes = [];
@@ -307,6 +309,16 @@
 
     function distance(a, b) {
       return Math.hypot(b.x - a.x, b.y - a.y);
+    }
+
+    function isStructuralStick(stick) {
+      return stick.type === 'pillar' || stick.type === 'beam' || stick.type === 'brace';
+    }
+
+    function computeStrain(currentLength, restLength) {
+      // 安全なひずみ計算：restLengthが0の特殊拘束でゼロ除算を起こさない。
+      if (restLength <= EPSILON) return 0;
+      return (currentLength - restLength) / restLength;
     }
 
     function resizeCanvasToDisplaySize() {
@@ -436,6 +448,12 @@
     function computeStressBeforeConstraints() {
       maxStressRatio = 0;
       for (const stick of sticks) {
+        if (stick.type === 'foundation' || stick.restLength <= EPSILON) {
+          // foundation stickは柱脚追従用の特殊拘束なので、応力・最大負荷には含めない。
+          stick.preStrain = 0;
+          stick.stressRatio = 0;
+          continue;
+        }
         if (stick.broken) {
           stick.stressRatio = 1.5;
           continue;
@@ -444,7 +462,7 @@
         const b = nodes[stick.b];
         const currentLength = Math.max(0.0001, distance(a, b));
         // preStrainの計算：拘束解決後では負荷が隠れるため、解決前の予測ひずみを使う。
-        const preStrain = (currentLength - stick.restLength) / stick.restLength;
+        const preStrain = computeStrain(currentLength, stick.restLength);
         stick.preStrain = preStrain;
         let ratio = preStrain >= 0
           ? preStrain / stick.maxTensionStrain
@@ -464,7 +482,10 @@
         stick.columnTilt = columnTilt;
       }
 
-      maxStressRatio = sticks.reduce((max, s) => s.broken ? max : Math.max(max, s.stressRatio), 0);
+      const structuralSticks = sticks.filter(s => !s.broken && isStructuralStick(s));
+      maxStressRatio = structuralSticks.length
+        ? Math.max(...structuralSticks.map(s => s.stressRatio || 0))
+        : 0;
     }
 
     function breakOverloadedMembers() {
@@ -632,13 +653,13 @@
     }
 
     function updateStatusPanel() {
-      const brokenCount = sticks.filter(s => s.broken).length;
-      const status = collapsed ? '倒壊しました' : maxStressRatio >= 0.5 ? '注意' : '安定';
+      const brokenCount = sticks.filter(s => s.broken && isStructuralStick(s)).length;
+      const status = collapsed ? '倒壊しました' : maxStressRatio >= 1 ? '危険' : maxStressRatio >= 0.5 ? '注意' : '安定';
       patternLabel.textContent = PATTERN_NAMES[currentPattern];
       brokenCountEl.textContent = String(brokenCount);
       maxStressEl.textContent = `${Math.round(clamp(maxStressRatio, 0, 1.5) * 100)}%`;
       statusText.textContent = status;
-      statusText.className = 'status-text' + (collapsed ? ' collapsed' : maxStressRatio >= 0.5 ? ' caution' : '');
+      statusText.className = 'status-text' + (collapsed ? ' collapsed' : maxStressRatio >= 1 ? ' danger' : maxStressRatio >= 0.5 ? ' caution' : '');
     }
 
     function animationLoop(now) {
