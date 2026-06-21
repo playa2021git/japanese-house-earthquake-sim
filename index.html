@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>日本家屋の耐震実験シミュレーター v0.4</title>
+    <title>日本家屋の耐震実験シミュレーター v0.5</title>
     <style>
       :root {
         color-scheme: light;
@@ -241,7 +241,7 @@
   <body>
     <header>
       <h1>
-        日本家屋の耐震実験シミュレーター v0.4<br /><span style="color: #1578d4"
+        日本家屋の耐震実験シミュレーター v0.5<br /><span style="color: #1578d4"
           >二階建ての弱い階と、筋交い配置の良し悪しを調べよう。</span
         >
       </h1>
@@ -296,6 +296,13 @@
           は配置を残して地震だけ初期化します。<span class="pill">全消去</span>
           は配置した筋交いをすべて消します。
         </p>
+        <pre
+          id="testResults"
+          class="message"
+          style="display: none; white-space: pre-wrap; font-size: 0.82rem"
+        >
+内部テストは未実行です。</pre
+        >
       </section>
       <section class="panel canvas-panel">
         <canvas
@@ -395,7 +402,15 @@
         startButton = document.getElementById("startBtn"),
         pauseButton = document.getElementById("pauseBtn"),
         resetButton = document.getElementById("resetBtn"),
-        slowButton = document.getElementById("slowBtn");
+        slowButton = document.getElementById("slowBtn"),
+        testButton = document.getElementById("testBtn"),
+        toggleTestButton = document.getElementById("toggleTestBtn"),
+        testResultsEl = document.getElementById("testResults");
+      if (!canvas || !ctx) {
+        throw new Error(
+          "Canvas 2D コンテキストを取得できません。ブラウザ環境を確認してください。",
+        );
+      }
       const FIXED_DT = 1 / 60,
         MAX_STEPS_PER_FRAME = 5,
         CONSTRAINT_ITERATIONS = 18,
@@ -405,35 +420,35 @@
         MIN_COLLAPSE_TIME = 1.5,
         EPSILON = 1e-6;
       const SHINDO_PRESETS = {
-        1: { amplitude: 3, frequency: 0.8, impulse: 0.05, damageRate: 0.08 },
-        2: { amplitude: 6, frequency: 0.9, impulse: 0.08, damageRate: 0.12 },
-        3: { amplitude: 10, frequency: 1, impulse: 0.12, damageRate: 0.18 },
-        4: { amplitude: 16, frequency: 1.15, impulse: 0.18, damageRate: 0.28 },
+        1: { amplitude: 3, frequency: 0.75, impulse: 0.04, damageRate: 0.05 },
+        2: { amplitude: 6, frequency: 0.85, impulse: 0.07, damageRate: 0.09 },
+        3: { amplitude: 10, frequency: 1, impulse: 0.11, damageRate: 0.15 },
+        4: { amplitude: 16, frequency: 1.15, impulse: 0.17, damageRate: 0.24 },
         "5弱": {
           amplitude: 24,
           frequency: 1.3,
-          impulse: 0.28,
-          damageRate: 0.45,
+          impulse: 0.27,
+          damageRate: 0.4,
         },
         "5強": {
           amplitude: 34,
           frequency: 1.45,
-          impulse: 0.42,
-          damageRate: 0.65,
+          impulse: 0.4,
+          damageRate: 0.58,
         },
         "6弱": {
-          amplitude: 46,
+          amplitude: 45,
           frequency: 1.6,
-          impulse: 0.58,
-          damageRate: 0.85,
+          impulse: 0.54,
+          damageRate: 0.78,
         },
         "6強": {
-          amplitude: 58,
+          amplitude: 56,
           frequency: 1.75,
-          impulse: 0.72,
-          damageRate: 1.05,
+          impulse: 0.68,
+          damageRate: 0.98,
         },
-        7: { amplitude: 72, frequency: 1.9, impulse: 0.9, damageRate: 1.35 },
+        7: { amplitude: 70, frequency: 1.9, impulse: 0.86, damageRate: 1.25 },
       };
       let nodes = [],
         sticks = [],
@@ -485,6 +500,11 @@
       function clamp(v, min, max) {
         return Math.max(min, Math.min(max, v));
       }
+      function safeNumber(value, fallback, label) {
+        if (Number.isFinite(value)) return value;
+        console.warn(`数値異常を補正しました: ${label}`, value);
+        return fallback;
+      }
       function distance(a, b) {
         return Math.hypot(b.x - a.x, b.y - a.y);
       }
@@ -527,6 +547,7 @@
           col,
           editable,
           mass,
+          invMass: fixed ? 0 : 1 / Math.max(mass, EPSILON),
           label: nodeLabel(role, floor, col),
         });
         return id;
@@ -1124,18 +1145,17 @@
               dist < s.restLength ? s.compressionStiffness : s.tensionStiffness;
             const ox = dx * diff,
               oy = dy * diff;
-            if (!a.fixed && !b.fixed) {
-              a.x += ox * 0.5;
-              a.y += oy * 0.5;
-              b.x -= ox * 0.5;
-              b.y -= oy * 0.5;
-            } else if (!a.fixed && b.fixed) {
-              a.x += ox;
-              a.y += oy;
-            } else if (a.fixed && !b.fixed) {
-              b.x -= ox;
-              b.y -= oy;
-            }
+            // 質量差を反映した拘束解決。重い屋根・2階床は動きにくい。
+            const invA = a.invMass || 0,
+              invB = b.invMass || 0,
+              invSum = invA + invB;
+            if (invSum <= EPSILON) continue;
+            const shareA = invA / invSum,
+              shareB = invB / invSum;
+            a.x += ox * shareA;
+            a.y += oy * shareA;
+            b.x -= ox * shareB;
+            b.y -= oy * shareB;
           }
         }
       }
@@ -1306,12 +1326,20 @@
         ]);
         setMessage("悪い例：左側だけに補強が偏っています。");
       }
+      function removeUserBrace(index) {
+        if (index < 0 || index >= userBraces.length) {
+          console.warn("無効な筋交い削除indexです", index);
+          return false;
+        }
+        userBraces.splice(index, 1);
+        return true;
+      }
       function undoLastBrace() {
         if (!userBraces.length) {
           setMessage("取り消す筋交いがありません。");
           return;
         }
-        userBraces.pop();
+        removeUserBrace(userBraces.length - 1);
         resetSimulation();
         setMessage("最後に追加した筋交いを取り消しました。");
       }
@@ -1590,6 +1618,95 @@
         ctx.stroke();
         ctx.restore();
       }
+
+      function drawWeakStoryOverlay() {
+        // 配置評価が示す弱い階を、薄い赤色の帯でCanvas上に示す。
+        if (evaluation.weakStory === "なし") return;
+        const top =
+          evaluation.weakStory === "1階"
+            ? modelBounds.floor2Y
+            : modelBounds.roofBeamY;
+        const bottom =
+          evaluation.weakStory === "1階"
+            ? modelBounds.baseY
+            : modelBounds.floor2Y;
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 128, 64, 0.10)";
+        ctx.fillRect(
+          modelBounds.left - 18,
+          top,
+          modelBounds.right - modelBounds.left + 36,
+          bottom - top,
+        );
+        ctx.fillStyle = "rgba(190, 70, 20, 0.78)";
+        ctx.font = "800 13px system-ui,sans-serif";
+        ctx.fillText("弱い階", modelBounds.right + 8, (top + bottom) / 2);
+        ctx.restore();
+      }
+
+      function drawDriftGauge() {
+        // 層間変形ゲージ。右パネルの％表示と同じstoryDriftを使う。
+        const gauges = [
+          {
+            label: "1階変形",
+            value: storyDrift.floor1,
+            y: (modelBounds.baseY + modelBounds.floor2Y) / 2,
+          },
+          {
+            label: "2階変形",
+            value: storyDrift.floor2,
+            y: (modelBounds.floor2Y + modelBounds.roofBeamY) / 2,
+          },
+        ];
+        ctx.save();
+        ctx.font = "800 12px system-ui,sans-serif";
+        for (const g of gauges) {
+          const x = modelBounds.right + 18;
+          const width = 72;
+          ctx.fillStyle = "rgba(255,255,255,.78)";
+          ctx.fillRect(x, g.y - 12, width, 10);
+          ctx.fillStyle =
+            g.value > 0.1 ? "#d94336" : g.value > 0.05 ? "#d08a00" : "#218148";
+          ctx.fillRect(x, g.y - 12, clamp(g.value / 0.12, 0, 1) * width, 10);
+          ctx.strokeStyle = "rgba(40,50,65,.45)";
+          ctx.strokeRect(x, g.y - 12, width, 10);
+          ctx.fillStyle = "rgba(20,30,45,.78)";
+          ctx.fillText(g.label, x, g.y - 17);
+        }
+        ctx.restore();
+      }
+
+      function drawStructure() {
+        drawWeakStoryOverlay();
+        drawDecorations();
+        for (const s of sticks.filter((s) => s.type === "foundation"))
+          drawStick(s);
+        for (const s of sticks.filter((s) => s.type === "brace")) drawStick(s);
+        for (const s of sticks.filter(
+          (s) => s.type !== "foundation" && s.type !== "brace",
+        ))
+          drawStick(s);
+      }
+
+      function drawJoints() {
+        drawEditableJoints();
+      }
+
+      function drawHUD(w) {
+        drawLabels(w);
+        drawDriftGauge();
+        drawQuakeInfo(w);
+      }
+
+      function drawStatusOverlay(w, h) {
+        if (!collapsed) return;
+        ctx.fillStyle = "rgba(217,67,54,.92)";
+        ctx.fillRect(w / 2 - 145, h * 0.16, 290, 58);
+        ctx.fillStyle = "#fff";
+        ctx.font = "900 27px system-ui,sans-serif";
+        ctx.fillText("倒壊しました", w / 2 - 86, h * 0.16 + 38);
+      }
+
       function draw() {
         const r = canvas.getBoundingClientRect(),
           w = r.width,
@@ -1639,24 +1756,10 @@
           Math.PI * 2,
         );
         ctx.fill();
-        drawDecorations();
-        for (const s of sticks.filter((s) => s.type === "foundation"))
-          drawStick(s);
-        for (const s of sticks.filter((s) => s.type === "brace")) drawStick(s);
-        for (const s of sticks.filter(
-          (s) => s.type !== "foundation" && s.type !== "brace",
-        ))
-          drawStick(s);
-        drawEditableJoints();
-        drawLabels(w);
-        if (collapsed) {
-          ctx.fillStyle = "rgba(217,67,54,.92)";
-          ctx.fillRect(w / 2 - 145, h * 0.16, 290, 58);
-          ctx.fillStyle = "#fff";
-          ctx.font = "900 27px system-ui,sans-serif";
-          ctx.fillText("倒壊しました", w / 2 - 86, h * 0.16 + 38);
-        }
-        drawQuakeInfo(w);
+        drawStructure();
+        drawJoints();
+        drawHUD(w);
+        drawStatusOverlay(w, h);
         ctx.restore();
       }
       function updateStatusPanel() {
@@ -1702,6 +1805,205 @@
                   ? " caution"
                   : " stable");
       }
+
+      function computeStructuralMetrics() {
+        // 右パネル・内部テストが同じ指標を参照するための集約関数。
+        return {
+          elapsedTime,
+          maxStressRatio: safeNumber(maxStressRatio, 0, "maxStressRatio"),
+          firstStoryDrift: safeNumber(storyDrift.floor1, 0, "firstStoryDrift"),
+          secondStoryDrift: safeNumber(
+            storyDrift.floor2,
+            0,
+            "secondStoryDrift",
+          ),
+          floor1Damage: safeNumber(storyDamage.floor1, 0, "floor1Damage"),
+          floor2Damage: safeNumber(storyDamage.floor2, 0, "floor2Damage"),
+          collapsed,
+          evaluation: { ...evaluation },
+        };
+      }
+
+      function braceKeysForGoodLayout() {
+        const list = [];
+        for (const floor of [1, 2]) {
+          for (let span = 0; span < 3; span++) {
+            const lower = floor === 1 ? "base:0" : "floor2:1";
+            const upper = floor === 1 ? "floor2:1" : "roofBeam:2";
+            list.push(
+              [`${lower}:${span}`, `${upper}:${span + 1}`],
+              [`${lower}:${span + 1}`, `${upper}:${span}`],
+            );
+          }
+        }
+        return list;
+      }
+
+      async function simulateAcceptanceCase({ name, shindo, braces, seconds }) {
+        currentShindo = shindo;
+        setBraces(braces);
+        running = true;
+        collapsed = false;
+        startButton.textContent = "開始中";
+        const steps = Math.round(seconds / FIXED_DT);
+        let firstDangerAt = null;
+        for (let i = 0; i < steps; i++) {
+          step(FIXED_DT);
+          const statusDanger =
+            storyDamage.floor1 >= 0.45 ||
+            storyDamage.floor2 >= 0.45 ||
+            maxStressRatio >= 0.5 ||
+            collapsed;
+          if (firstDangerAt == null && statusDanger)
+            firstDangerAt = elapsedTime;
+          if (i % 120 === 0)
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        updateStatusPanel();
+        return { name, shindo, firstDangerAt, ...computeStructuralMetrics() };
+      }
+
+      function judgeAcceptanceResult(key, result, baseline = null) {
+        const dangerTime = result.firstDangerAt ?? Infinity;
+        if (key === "A") {
+          return (
+            result.firstStoryDrift > 0.01 &&
+            result.floor1Damage > 0.08 &&
+            dangerTime >= 1.5 &&
+            dangerTime <= 12 &&
+            result.maxStressRatio > 0.02
+          );
+        }
+        if (key === "B") {
+          return (
+            result.evaluation.grade === "悪い" &&
+            result.evaluation.weakStory === "1階" &&
+            result.floor1Damage > 0.1 &&
+            dangerTime >= 1.5 &&
+            dangerTime <= 12
+          );
+        }
+        if (key === "C") {
+          return (
+            ["悪い", "普通"].includes(result.evaluation.grade) &&
+            result.evaluation.message.includes("偏") &&
+            dangerTime <= 10
+          );
+        }
+        if (key === "D") {
+          return (
+            result.evaluation.grade === "良い" &&
+            !result.collapsed &&
+            result.elapsedTime >= 10 &&
+            result.maxStressRatio > 0.005 &&
+            result.floor1Damage > 0.005 &&
+            (!baseline || result.floor1Damage < baseline.floor1Damage)
+          );
+        }
+        if (key === "E") {
+          return (
+            result.evaluation.grade === "良い" &&
+            (result.firstDangerAt == null || result.firstDangerAt >= 1.5) &&
+            (result.floor1Damage > 0.08 ||
+              result.floor2Damage > 0.08 ||
+              result.maxStressRatio > 0.08)
+          );
+        }
+        if (key === "F") {
+          return !result.collapsed && result.floor1Damage > 0.01;
+        }
+        return false;
+      }
+
+      async function runAcceptanceTests() {
+        // 開発用内部テスト。UI操作なしで代表ケースを進め、数値と評価の矛盾を検出する。
+        const savedBraces = userBraces.map((brace) => ({ ...brace }));
+        const savedShindo = currentShindo;
+        const savedSlow = slowMotion;
+        const savedEdit = editMode;
+        testResultsEl.style.display = "block";
+        testResultsEl.textContent = "内部テストを実行中...";
+        try {
+          const cases = {
+            A: {
+              name: "筋交いなし / 震度5強",
+              shindo: "5強",
+              braces: [],
+              seconds: 20,
+            },
+            B: {
+              name: "2階だけX字 / 震度6弱",
+              shindo: "6弱",
+              braces: [
+                ["floor2:1:0", "roofBeam:2:1"],
+                ["floor2:1:1", "roofBeam:2:0"],
+                ["floor2:1:1", "roofBeam:2:2"],
+                ["floor2:1:2", "roofBeam:2:1"],
+                ["floor2:1:2", "roofBeam:2:3"],
+                ["floor2:1:3", "roofBeam:2:2"],
+              ],
+              seconds: 20,
+            },
+            C: {
+              name: "片側だけX字 / 震度6弱",
+              shindo: "6弱",
+              braces: [
+                ["base:0:0", "floor2:1:1"],
+                ["base:0:1", "floor2:1:0"],
+                ["floor2:1:0", "roofBeam:2:1"],
+                ["floor2:1:1", "roofBeam:2:0"],
+              ],
+              seconds: 20,
+            },
+            D: {
+              name: "良配置 / 震度6弱",
+              shindo: "6弱",
+              braces: braceKeysForGoodLayout(),
+              seconds: 12,
+            },
+            E: {
+              name: "良配置 / 震度7",
+              shindo: "7",
+              braces: braceKeysForGoodLayout(),
+              seconds: 12,
+            },
+            F: {
+              name: "筋交いなし / 震度1",
+              shindo: "1",
+              braces: [],
+              seconds: 60,
+            },
+          };
+          const results = {};
+          for (const key of Object.keys(cases)) {
+            results[key] = await simulateAcceptanceCase(cases[key]);
+          }
+          const lines = ["内部テスト:"];
+          for (const key of Object.keys(results)) {
+            const pass = judgeAcceptanceResult(key, results[key], results.B);
+            const r = results[key];
+            lines.push(
+              `${key} ${r.name}: ${pass ? "PASS" : "WARN"} / ` +
+                `危険到達=${r.firstDangerAt == null ? "なし" : r.firstDangerAt.toFixed(1) + "秒"}, ` +
+                `1階D=${Math.round(r.floor1Damage * 100)}%, 2階D=${Math.round(r.floor2Damage * 100)}%, ` +
+                `1階変形=${(r.firstStoryDrift * 100).toFixed(1)}%, 評価=${r.evaluation.grade}`,
+            );
+          }
+          console.table(results);
+          testResultsEl.textContent = lines.join("\n");
+        } catch (error) {
+          console.warn("内部テストでエラーが発生しました", error);
+          testResultsEl.textContent = `内部テストでエラー: ${error.message}`;
+        } finally {
+          userBraces = savedBraces;
+          currentShindo = savedShindo;
+          shindoSelect.value = savedShindo;
+          slowMotion = savedSlow;
+          editMode = savedEdit;
+          resetSimulation();
+        }
+      }
+
       function animationLoop(now) {
         resizeCanvasToDisplaySize();
         const realDelta = Math.min((now - lastFrameTime) / 1000, 0.08);
@@ -1724,47 +2026,54 @@
         draw();
         requestAnimationFrame(animationLoop);
       }
-      editButton.addEventListener("click", () => {
-        editMode = !editMode;
-        selectedNodeId = null;
-        editButton.textContent = editMode ? "筋交い追加ON" : "筋交い追加OFF";
-        editButton.classList.toggle("active", editMode);
-        setMessage(
-          editMode
-            ? "筋交いを入れたい2点をクリックしてください。"
-            : "筋交い追加モードをOFFにしました。",
-        );
-      });
-      undoBraceButton.addEventListener("click", undoLastBrace);
-      clearBraceButton.addEventListener("click", clearUserBraces);
-      recommendButton.addEventListener("click", addRecommendedBraces);
-      badSecondButton.addEventListener("click", addBadSecondStory);
-      badSideButton.addEventListener("click", addBadSide);
-      shindoSelect.addEventListener("change", () => {
-        currentShindo = shindoSelect.value;
+      function initApp() {
+        // 初期化・UIイベント登録は一度だけ行い、requestAnimationFrameの増殖を防ぐ。
+        editButton.addEventListener("click", () => {
+          editMode = !editMode;
+          selectedNodeId = null;
+          editButton.textContent = editMode ? "筋交い追加ON" : "筋交い追加OFF";
+          editButton.classList.toggle("active", editMode);
+          setMessage(
+            editMode
+              ? "筋交いを入れたい2点をクリックしてください。"
+              : "筋交い追加モードをOFFにしました。",
+          );
+        });
+        undoBraceButton.addEventListener("click", undoLastBrace);
+        clearBraceButton.addEventListener("click", clearUserBraces);
+        recommendButton.addEventListener("click", addRecommendedBraces);
+        badSecondButton.addEventListener("click", addBadSecondStory);
+        badSideButton.addEventListener("click", addBadSide);
+        shindoSelect.addEventListener("change", () => {
+          currentShindo = shindoSelect.value;
+          resetSimulation();
+        });
+        startButton.addEventListener("click", startSimulation);
+        pauseButton.addEventListener("click", pauseSimulation);
+        resetButton.addEventListener("click", resetSimulation);
+        slowButton.addEventListener("click", () => {
+          slowMotion = !slowMotion;
+          slowButton.textContent = slowMotion ? "スローON" : "スローOFF";
+          slowButton.classList.toggle("active", slowMotion);
+        });
+        testButton.addEventListener("click", () => {
+          runAcceptanceTests();
+        });
+        toggleTestButton.addEventListener("click", () => {
+          testResultsEl.style.display =
+            testResultsEl.style.display === "none" ? "block" : "none";
+        });
+        canvas.addEventListener("click", handleCanvasClick);
+        canvas.addEventListener("mousemove", handleCanvasMove);
+        canvas.addEventListener("mouseleave", () => {
+          hoverNodeId = null;
+        });
+        window.addEventListener("resize", resizeCanvasToDisplaySize);
+        resizeCanvasToDisplaySize();
         resetSimulation();
-      });
-      startButton.addEventListener("click", startSimulation);
-      pauseButton.addEventListener("click", pauseSimulation);
-      resetButton.addEventListener("click", resetSimulation);
-      slowButton.addEventListener("click", () => {
-        slowMotion = !slowMotion;
-        slowButton.textContent = slowMotion ? "スローON" : "スローOFF";
-        slowButton.classList.toggle("active", slowMotion);
-      });
-      canvas.addEventListener("click", handleCanvasClick);
-      canvas.addEventListener("mousemove", (e) => {
-        const p = mousePos(e);
-        hoverNodeId = editMode ? findNearestEditableNode(p.x, p.y) : null;
-        canvas.style.cursor = hoverNodeId == null ? "default" : "pointer";
-      });
-      canvas.addEventListener("mouseleave", () => {
-        hoverNodeId = null;
-      });
-      window.addEventListener("resize", resizeCanvasToDisplaySize);
-      resizeCanvasToDisplaySize();
-      resetSimulation();
-      requestAnimationFrame(animationLoop);
+        requestAnimationFrame(animationLoop);
+      }
+      initApp();
     </script>
   </body>
 </html>
