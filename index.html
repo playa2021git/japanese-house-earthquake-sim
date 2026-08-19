@@ -57,10 +57,31 @@
   .shindo-select{display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:10px;}
   .shindo-select button{
     padding:8px 2px; font-size:.8rem; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer;
+    position:relative;
   }
   .shindo-select button.active{background:var(--accent2); color:#fff; border-color:var(--accent2);}
+  .shindo-select button[data-tip]{ border-bottom:2px dotted var(--accent2); }
+  .shindo-select button[data-tip]:hover::after{
+    content: attr(data-tip);
+    position:absolute; left:50%; bottom:calc(100% + 10px); transform:translateX(-50%);
+    background:#3a332a; color:#fbf6ea; font-size:.68rem; line-height:1.4;
+    padding:7px 9px; border-radius:6px; width:190px; text-align:left; font-weight:normal;
+    box-shadow:0 6px 16px rgba(0,0,0,.3); z-index:30; pointer-events:none;
+  }
+  .shindo-select button[data-tip]:hover::before{
+    content:""; position:absolute; left:50%; bottom:calc(100% + 4px); transform:translateX(-50%);
+    border:6px solid transparent; border-top-color:#3a332a; z-index:30; pointer-events:none;
+  }
   .btnrow{display:flex; flex-direction:column; gap:6px; margin-bottom:12px;}
   .btnrow .primary{background:var(--accent); color:#fff; border-color:var(--accent); font-weight:bold;}
+  .btnrow .primary.clear-highlight{
+    background:linear-gradient(135deg,#2e7d4f,#48b57e); border-color:#2e7d4f; color:#fff;
+    font-size:1.05rem; padding:14px 8px;
+    box-shadow:0 0 0 3px rgba(46,125,79,.22), 0 6px 16px rgba(46,125,79,.4);
+    animation:clearPulse 1.3s ease-in-out infinite;
+  }
+  @keyframes clearPulse{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.05); } }
+  .sfx-row{display:flex; align-items:center; gap:6px; font-size:.8rem; color:var(--sub); margin:2px 0 10px;}
   .status-table{width:100%; border-collapse:collapse; font-size:.8rem;}
   .status-table td{padding:4px 2px; border-bottom:1px dashed var(--line);}
   .status-table td:first-child{color:var(--sub);}
@@ -75,12 +96,12 @@
 <body>
 <header>
   <h1>木造軸組 耐震シミュレーター <span id="modeBadge" class="mode-badge edit">編集モード</span></h1>
-  <p>2D画面で筋交いを設置・交換・撤去 → 地震シミュレーションは3Dで実行し、三次元的に倒壊するか耐えるかを確認します。</p>
+  <p>2D画面で筋交いを設置・交換・撤去 → 地震シミュレーションは3Dで実行し、三次元的に倒壊するか耐えるかを確認します。屋根・床板つきの見た目で、筋交いのある家／ない家を比較できます。</p>
 </header>
 <div class="app">
   <div class="main">
     <div class="panel editor-panel">
-      <h2>① 筋交いエディタ（2D・壁面ごと）</h2>
+      <h2>① 筋交いエディタ（2D・前後面／左右妻の2セット）</h2>
       <div class="tabs" id="faceTabs"></div>
       <canvas id="editorCanvas"></canvas>
       <div class="legend">
@@ -88,12 +109,12 @@
         <span><span class="swatch" style="background:#b97900;"></span>片筋交い</span>
         <span><span class="swatch" style="background:#075da8;"></span>X字筋交い</span>
       </div>
-      <p style="font-size:.75rem;color:var(--sub);margin:8px 0 0;">マス目をクリックすると なし→／→＼→Ｘ→なし の順で切り替わります。</p>
+      <p style="font-size:.75rem;color:var(--sub);margin:8px 0 0;">マス目をクリックすると なし→／→＼→Ｘ→なし の順で切り替わります。「前後面」タブは前面と背面、「左右妻」タブは左妻と右妻に、それぞれ同じ配置が自動的に適用されます。</p>
       <div class="presets">
         <div style="font-size:.8rem;color:var(--sub);margin-top:6px;">内部テスト（配置プリセット）</div>
         <button data-preset="none">① 筋交いなし（四角形骨組みのみ）</button>
         <button data-preset="floor2only">② 2階だけX字配置（1階が弱い＝ピロティ崩壊）</button>
-        <button data-preset="backopen">③ 3方向だけX字配置（背面だけ無筋交い＝偏り）</button>
+        <button data-preset="backopen">③ 前後面だけX字配置（左右妻は無筋交い＝偏り）</button>
         <button data-preset="all">④ 全ベイX字配置（良配置）</button>
       </div>
     </div>
@@ -110,6 +131,7 @@
     <div class="panel control-panel">
       <h2>③ 震度と操作</h2>
       <div class="shindo-select" id="shindoSelect"></div>
+      <label class="sfx-row"><input type="checkbox" id="sfxToggle" checked /> 揺れの効果音を鳴らす</label>
       <div class="btnrow">
         <button id="startBtn" class="primary">開始</button>
         <button id="resetBtn">編集モードに戻る（リセット）</button>
@@ -118,6 +140,7 @@
       <h2>状態</h2>
       <table class="status-table">
         <tr><td>判定</td><td id="stJudge">未実施</td></tr>
+        <tr><td>10秒耐久</td><td id="stClear">未達成</td></tr>
         <tr><td>経過時間</td><td id="stTime">0.0 s</td></tr>
         <tr><td>1階 層間変形</td><td id="stDrift1">0%</td></tr>
         <tr><td>2階 層間変形</td><td id="stDrift2">0%</td></tr>
@@ -144,10 +167,21 @@ const FACES = [
   {key:"left",  label:"左妻"},
   {key:"right", label:"右妻"},
 ];
+// 編集UIでは「前後面」「左右妻」の2セットにまとめる。片方を編集すると対になる面へ自動的にミラーする。
+const FACE_PAIR = { front:"back", back:"front", left:"right", right:"left" };
+const FACE_GROUPS = [
+  {key:"frontback", label:"前後面", repFace:"front"},
+  {key:"leftright", label:"左右妻", repFace:"left"},
+];
 const GRAVITY = 9.8, DAMPING = 0.986, FIXED_DT = 1/120, SOLVER_ITERS = 20;
 const DRIFT_COLOR_LIMIT = 0.11, DRIFT_COLLAPSE_LIMIT = 0.4, HEIGHT_LOSS_COLLAPSE = 0.32;
 const MIN_COLLAPSE_TIME = 1.0, IMPULSE_SCALE = 3.0;
+const CRUMBLE_DURATION = 1.6; // 倒壊判定後、ぺしゃんこになるまでのアニメーション秒数
 const EPS = 1e-6;
+// 筋交いの疲労蓄積（許容ひずみを一度も超えなくても、強い揺れに長時間さらされると徐々に傷む）
+const FATIGUE_ONSET = 0.12;  // この応力比を超えた分だけ疲労が進む（それ以下はほぼノーダメージ）
+const FATIGUE_RATE = 40;     // 疲労の進行速度（大きいほど早く壊れる）
+const CLEAR_TIME = 10;       // この秒数、倒壊せずに耐えたら「クリア」として自動停止する
 
 const SHINDO_PRESETS = {
   "1": {amplitude:0.015, frequency:1.2, impulse:0.055, duration:18, strongDuration:4},
@@ -162,6 +196,14 @@ const SHINDO_PRESETS = {
 };
 const SHINDO_ORDER = ["1","2","3","4","5w","5s","6w","6s","7"];
 const SHINDO_LABEL = {"1":"震度1","2":"震度2","3":"震度3","4":"震度4","5w":"震度5弱","5s":"震度5強","6w":"震度6弱","6s":"震度6強","7":"震度7"};
+// 震度5強以上のボタンにマウスを乗せたときの参考例（実際に観測された地震。1つの地震でも場所により震度は異なるため、
+// その地震が記録した最大震度クラスの目安として表示）
+const SHINDO_EXAMPLES = {
+  "5s":"2021年10月 千葉県北西部の地震級（東京23区で10年ぶりの震度5強を観測）",
+  "6w":"2018年 大阪府北部地震級（高槻市などで観測）",
+  "6s":"2019年 山形県沖の地震級（新潟県村上市で観測）",
+  "7":"阪神・淡路大震災級／東日本大震災級／2024年能登半島地震級（いずれも震度7を観測）",
+};
 
 /* =========================================================
    2. 状態
@@ -170,11 +212,15 @@ let nodes = new Map();
 let sticks = [];
 let bays = [];
 let stickIdSeq = 0;
-let selectedFace = "front";
+let selectedGroup = "frontback";
 let currentShindo = "1";
 let mode = "edit"; // 'edit' | 'sim'
 let running = false;
 let collapsed = false;
+let cleared = false;
+let crumbleTime = 0;      // 倒壊判定後、ぺしゃんこアニメーションの経過時間
+let crumbleFrom = null;   // 倒壊が確定した瞬間の各ノード位置（Map nodeId -> {x,y,z}）
+let crumbleTargetY = null; // 各ノードの最終的な高さ（Map nodeId -> y）
 let excitationMode = "earthquake"; // 'earthquake' | 'continuous'
 let quakeTime = 0, runTime = 0, excitationLevel = 0;
 let groundX = 0, prevGroundX = 0;
@@ -290,6 +336,10 @@ function cycleBay(bay){
   const order = ["none","slash","backslash","x"];
   const next = order[(order.indexOf(bay.state)+1) % order.length];
   setBayState(bay, next);
+  // 前後面／左右妻はセットとして扱うため、対になる面にも同じ配置をミラーする
+  const pairFace = FACE_PAIR[bay.face];
+  const pairBay = bays.find(b=>b.face===pairFace && b.story===bay.story && b.span===bay.span);
+  if(pairBay) setBayState(pairBay, next);
 }
 
 /* =========================================================
@@ -301,7 +351,8 @@ function resetPhysicsState(){
     n.px = n.x; n.py = n.y; n.pz = n.z;
   }
   for(const s of sticks){ s.damage = 0; s.broken = false; s.strain = 0; s.stressRatio = 0; }
-  quakeTime = 0; runTime = 0; running = false; collapsed = false;
+  quakeTime = 0; runTime = 0; running = false; collapsed = false; cleared = false;
+  crumbleTime = 0; crumbleFrom = null; crumbleTargetY = null;
   excitationLevel = 0; groundX = 0; prevGroundX = 0;
   storyDrift = {floor1:0, floor2:0}; maxBraceStress = 0;
   judgeText = "未実施";
@@ -402,12 +453,22 @@ function updateDamageAndStress(dt){
       continue;
     }
     if(s.broken){ s.stressRatio = 1.3; continue; }
+    const denom = Math.max(Math.abs(s.maxTension), Math.abs(s.maxCompression));
     let over = 0;
     if(strain > s.maxTension) over = (strain - s.maxTension)/Math.abs(s.maxTension);
     else if(strain < s.maxCompression) over = (strain - s.maxCompression)/Math.abs(s.maxCompression);
-    if(over>0) s.damage = Math.min(1.4, s.damage + over*s.damageRate*dt);
+    if(over>0){
+      // 許容ひずみを超えた一発の損傷（従来通り・急速に進む）
+      s.damage = Math.min(1.4, s.damage + over*s.damageRate*dt);
+    } else {
+      // 許容ひずみ以内でも、強い応力が繰り返しかかると少しずつ疲労が蓄積する
+      const ratio = Math.abs(strain)/denom;
+      if(ratio > FATIGUE_ONSET){
+        const f = (ratio - FATIGUE_ONSET) / (1 - FATIGUE_ONSET);
+        s.damage = Math.min(1.4, s.damage + f*f*f*FATIGUE_RATE*dt);
+      }
+    }
     if(s.damage>=1) s.broken = true;
-    const denom = Math.max(Math.abs(s.maxTension), Math.abs(s.maxCompression));
     s.stressRatio = Math.max(0, Math.min(1.4, Math.max(Math.abs(strain)/denom, s.damage)));
     maxBraceStress = Math.max(maxBraceStress, s.stressRatio);
   }
@@ -443,6 +504,7 @@ function updateStoryDriftAndCollapse(){
     if(storyDrift.floor1>DRIFT_COLLAPSE_LIMIT || storyDrift.floor2>DRIFT_COLLAPSE_LIMIT || heightLossRatio>HEIGHT_LOSS_COLLAPSE){
       collapsed = true;
       judgeText = "倒壊";
+      startCrumble();
     }
   }
   if(!collapsed && running){
@@ -451,7 +513,44 @@ function updateStoryDriftAndCollapse(){
   }
 }
 
+/* ---- 倒壊アニメーション（物理演算ではなく、位置を直接アニメーションさせる） ----
+   PBDの拘束をそのまま倒壊後も弱めて回すと、部材同士が矛盾した力を出し合って
+   「潰れたあと軽くバタつく／浮き上がる」ような不自然な挙動になってしまうため、
+   倒壊が確定した瞬間の姿勢をスナップショットし、そこから各ノードのY座標だけを
+   一方向に（イーズアウトで）地面近くまで下げる、という単純なアニメーションに置き換える。
+   X/Z座標は倒壊確定時点のまま固定し、上から下に潰れるだけの動きにする。 */
+function startCrumble(){
+  crumbleTime = 0;
+  crumbleFrom = new Map();
+  crumbleTargetY = new Map();
+  for(const n of nodes.values()){
+    if(n.fixed) continue;
+    crumbleFrom.set(n.id, {x:n.x, y:n.y, z:n.z});
+    crumbleTargetY.set(n.id, 0.03 + Math.random()*0.09); // 地面付近でわずかにバラつかせ、崩れた瓦礫らしくする
+  }
+  // 揺れ・効果音はここで止める
+  excitationLevel = 0; groundX = 0; prevGroundX = 0;
+}
+
+function crumbleStep(dt){
+  crumbleTime += dt;
+  const t = Math.min(1, crumbleTime/CRUMBLE_DURATION);
+  const eased = 1 - (1-t)*(1-t); // イーズアウト（単調に減少し、行き過ぎない）
+  for(const [id, from] of crumbleFrom){
+    const n = nodes.get(id);
+    if(!n) continue;
+    const targetY = crumbleTargetY.get(id);
+    n.y = from.y + (targetY - from.y)*eased;
+    n.x = from.x; n.z = from.z; // 横方向には動かさない（上から下に潰れるだけ）
+    n.px = n.x; n.py = n.y; n.pz = n.z; // 速度を残さない
+  }
+}
+
 function physicsStep(dt){
+  if(collapsed){
+    crumbleStep(dt);
+    return;
+  }
   integrate(dt);
   updateGroundMotion(dt);
   solveConstraints();
@@ -524,6 +623,50 @@ function drawThickLine(ctx, p1, p2, width, color){
   ctx.stroke();
 }
 
+/* ---- 切妻屋根（見た目のみ・2階梁の現在位置から毎フレーム再計算） ---- */
+const ROOF_RISE = (CFG.zSpans*CFG.span/2) * 0.62;   // 軒から棟までの立ち上がり
+const EAVE_OVERHANG = CFG.span * 0.28;              // 軒の出（前後方向）
+const GABLE_OVERHANG = CFG.span * 0.22;             // けらばの出（妻方向）
+
+function v3(a,b){ return {x:b.x-a.x, y:b.y-a.y, z:b.z-a.z}; }
+function v3norm(v){ const L=Math.hypot(v.x,v.y,v.z)||EPS; return {x:v.x/L,y:v.y/L,z:v.z/L}; }
+function v3add(p,v,s){ return {x:p.x+v.x*s, y:p.y+v.y*s, z:p.z+v.z*s}; }
+
+function extendXEnds(arr){
+  const n = arr.length;
+  if(n<2) return arr;
+  const d0 = v3norm(v3(arr[1], arr[0]));
+  arr[0] = v3add(arr[0], d0, GABLE_OVERHANG);
+  const d1 = v3norm(v3(arr[n-2], arr[n-1]));
+  arr[n-1] = v3add(arr[n-1], d1, GABLE_OVERHANG);
+  return arr;
+}
+
+function computeRoof(){
+  const xN = CFG.xSpans, zN = CFG.zSpans;
+  const colFront = [], colBack = [];
+  for(let ix=0; ix<=xN; ix++){
+    colFront.push(nodes.get(nk(2,ix,0)));
+    colBack.push(nodes.get(nk(2,ix,zN)));
+  }
+  const eaveFront = colFront.map((p,ix)=>{
+    const d = v3norm(v3(colBack[ix], p)); // 背面→前面 = 前方向
+    return v3add(p, d, EAVE_OVERHANG);
+  });
+  const eaveBack = colBack.map((p,ix)=>{
+    const d = v3norm(v3(colFront[ix], p)); // 前面→背面 = 後方向
+    return v3add(p, d, EAVE_OVERHANG);
+  });
+  const ridge = colFront.map((p,ix)=>{
+    const b = colBack[ix];
+    return {x:(p.x+b.x)/2, y:(p.y+b.y)/2+ROOF_RISE, z:(p.z+b.z)/2};
+  });
+  extendXEnds(eaveFront);
+  extendXEnds(eaveBack);
+  extendXEnds(ridge);
+  return {ridge, eaveFront, eaveBack, xN};
+}
+
 function renderView(){
   resizeCanvas(viewCanvas);
   const w = viewCanvas.clientWidth, h = viewCanvas.clientHeight;
@@ -552,20 +695,40 @@ function renderView(){
   vctx.strokeStyle = "#c8bc98";
   vctx.stroke();
 
-  // 描画アイテム一覧（床スラブ＋部材）を深度でソート
+  // 描画アイテム一覧（床板＋部材＋屋根）を深度でソート
   const items = [];
-  for(let level=1; level<=2; level++){
+  const FLOOR_STYLE = {
+    0:{fill:"#c9ab77", seam:"rgba(80,54,20,.3)"},   // 土台（加振台の上の基礎板）
+    1:{fill:"#ddc48f", seam:"rgba(80,54,20,.28)"},  // 1階床
+    2:{fill:"#e4cd9c", seam:"rgba(80,54,20,.28)"},  // 2階床・天井
+  };
+  for(let level=0; level<=2; level++){
     for(let ix=0; ix<CFG.xSpans; ix++) for(let iz=0; iz<CFG.zSpans; iz++){
       const keys = [nk(level,ix,iz), nk(level,ix+1,iz), nk(level,ix+1,iz+1), nk(level,ix,iz+1)];
       const pts = keys.map(k=>project(nodes.get(k)));
       const depth = pts.reduce((s,p)=>s+p.depth,0)/pts.length;
+      const style = FLOOR_STYLE[level];
       items.push({depth, draw:()=>{
         vctx.beginPath();
         vctx.moveTo(pts[0].sx,pts[0].sy);
         for(let i=1;i<pts.length;i++) vctx.lineTo(pts[i].sx,pts[i].sy);
         vctx.closePath();
-        vctx.fillStyle = level===2 ? "rgba(190,150,90,.4)" : "rgba(210,190,140,.4)";
+        vctx.fillStyle = style.fill;
         vctx.fill();
+        vctx.strokeStyle = "rgba(80,54,20,.35)";
+        vctx.stroke();
+        // 床板の目地（板張り風の見た目）
+        vctx.save();
+        vctx.clip();
+        vctx.strokeStyle = style.seam; vctx.lineWidth = 1;
+        const planks = 4;
+        for(let p=1; p<planks; p++){
+          const t = p/planks;
+          const x0=pts[0].sx+(pts[1].sx-pts[0].sx)*t, y0=pts[0].sy+(pts[1].sy-pts[0].sy)*t;
+          const x1=pts[3].sx+(pts[2].sx-pts[3].sx)*t, y1=pts[3].sy+(pts[2].sy-pts[3].sy)*t;
+          vctx.beginPath(); vctx.moveTo(x0,y0); vctx.lineTo(x1,y1); vctx.stroke();
+        }
+        vctx.restore();
       }});
     }
   }
@@ -589,6 +752,41 @@ function renderView(){
       }
     }});
   }
+
+  // 切妻屋根（棟木・前後2面の屋根勾配）
+  const roof = computeRoof();
+  for(let ix=0; ix<roof.xN; ix++){
+    const front = [roof.eaveFront[ix], roof.eaveFront[ix+1], roof.ridge[ix+1], roof.ridge[ix]].map(project);
+    const back  = [roof.eaveBack[ix],  roof.eaveBack[ix+1],  roof.ridge[ix+1], roof.ridge[ix]].map(project);
+    const dFront = front.reduce((s,p)=>s+p.depth,0)/front.length;
+    const dBack  = back.reduce((s,p)=>s+p.depth,0)/back.length;
+    items.push({depth:dFront, draw:()=>{
+      vctx.beginPath();
+      vctx.moveTo(front[0].sx,front[0].sy);
+      for(let i=1;i<front.length;i++) vctx.lineTo(front[i].sx,front[i].sy);
+      vctx.closePath();
+      vctx.fillStyle = "#d7b98a";
+      vctx.fill();
+      vctx.strokeStyle = "rgba(90,60,20,.45)";
+      vctx.stroke();
+    }});
+    items.push({depth:dBack, draw:()=>{
+      vctx.beginPath();
+      vctx.moveTo(back[0].sx,back[0].sy);
+      for(let i=1;i<back.length;i++) vctx.lineTo(back[i].sx,back[i].sy);
+      vctx.closePath();
+      vctx.fillStyle = "#c9a876";
+      vctx.fill();
+      vctx.strokeStyle = "rgba(90,60,20,.45)";
+      vctx.stroke();
+    }});
+  }
+  for(let ix=0; ix<roof.xN; ix++){
+    const pa = project(roof.ridge[ix]), pb = project(roof.ridge[ix+1]);
+    const depth = (pa.depth+pb.depth)/2;
+    items.push({depth, draw:()=> drawThickLine(vctx, pa, pb, 5, "#7a5a35")});
+  }
+
   items.sort((a,b)=>a.depth-b.depth);
   for(const it of items) it.draw();
 
@@ -609,13 +807,18 @@ function faceSpanCount(face){
   return (face==="front"||face==="back") ? CFG.xSpans : CFG.zSpans;
 }
 
+function currentGroup(){
+  return FACE_GROUPS.find(g=>g.key===selectedGroup) || FACE_GROUPS[0];
+}
+
 function renderEditor(){
   resizeCanvas(editorCanvas);
   const w = editorCanvas.clientWidth, h = editorCanvas.clientHeight;
   ectx.clearRect(0,0,w,h);
   editorBayRects = [];
 
-  const spans = faceSpanCount(selectedFace);
+  const repFace = currentGroup().repFace;
+  const spans = faceSpanCount(repFace);
   const marginL=54, marginR=20, marginT=24, marginB=40;
   const gridW = w-marginL-marginR, gridH = h-marginT-marginB;
   const cellW = gridW/spans, cellH = gridH/2;
@@ -631,7 +834,7 @@ function renderEditor(){
   for(let story=1; story<=2; story++){
     const rowIdx = story===2?0:1; // 2階を上に表示
     for(let sp=0; sp<spans; sp++){
-      const bay = bays.find(b=>b.face===selectedFace && b.span===sp && b.story===story);
+      const bay = bays.find(b=>b.face===repFace && b.span===sp && b.story===story);
       const x = marginL+sp*cellW, y = marginT+rowIdx*cellH;
       ectx.strokeRect(x,y,cellW,cellH);
       editorBayRects.push({bay, x,y,w:cellW,h:cellH});
@@ -702,17 +905,82 @@ document.getElementById("camResetBtn").addEventListener("click", ()=>{
 });
 
 /* =========================================================
+   8.5 効果音（Web Audio API・外部音源ファイルなし）
+   揺れの強さ(excitationLevel)に応じてゴゴゴという地鳴り風の音量・音色を変化させ、
+   倒壊の瞬間には短いドスンという音を鳴らす。
+   ========================================================= */
+const sfxToggleEl = document.getElementById("sfxToggle");
+let sfxEnabled = true;
+if(sfxToggleEl) sfxToggleEl.addEventListener("change", ()=>{ sfxEnabled = sfxToggleEl.checked; });
+
+let audioCtx = null, rumbleGain = null, rumbleFilter = null;
+
+function ensureAudio(){
+  if(audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC) return;
+  try{
+    audioCtx = new AC();
+    // ブラウンノイズ寄りのループ音源を1本作り、あとは音量とフィルタ周波数だけを揺れに合わせて動かす
+    const bufSize = Math.floor(audioCtx.sampleRate * 2);
+    const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    let last = 0;
+    for(let i=0;i<bufSize;i++){
+      const white = Math.random()*2-1;
+      last = (last + 0.025*white) / 1.025;
+      data[i] = last*3.2;
+    }
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    rumbleFilter = audioCtx.createBiquadFilter();
+    rumbleFilter.type = "lowpass"; rumbleFilter.frequency.value = 120;
+    rumbleGain = audioCtx.createGain();
+    rumbleGain.gain.value = 0;
+    src.connect(rumbleFilter); rumbleFilter.connect(rumbleGain); rumbleGain.connect(audioCtx.destination);
+    src.start();
+  }catch(e){ audioCtx = null; }
+  if(audioCtx && audioCtx.state==="suspended") audioCtx.resume().catch(()=>{});
+}
+
+function updateRumble(){
+  if(!audioCtx || !rumbleGain || !rumbleFilter) return;
+  const on = sfxEnabled && running && excitationLevel>0 && !(collapsed && crumbleTime>0.4);
+  const target = on ? Math.min(0.55, 0.12 + excitationLevel*0.5) : 0;
+  const now = audioCtx.currentTime;
+  rumbleGain.gain.setTargetAtTime(target, now, 0.1);
+  rumbleFilter.frequency.setTargetAtTime(100 + excitationLevel*160, now, 0.2);
+}
+
+function playCollapseThud(){
+  if(!audioCtx || !sfxEnabled) return;
+  const dur = 0.7;
+  const bufSize = Math.floor(audioCtx.sampleRate*dur);
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<bufSize;i++){
+    const t = i/bufSize;
+    data[i] = (Math.random()*2-1) * Math.pow(1-t, 2.2);
+  }
+  const src = audioCtx.createBufferSource(); src.buffer = buf;
+  const filter = audioCtx.createBiquadFilter(); filter.type = "lowpass"; filter.frequency.value = 90;
+  const gain = audioCtx.createGain(); gain.gain.value = 0.9;
+  src.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+  src.start();
+}
+
+/* =========================================================
    9. UI 構築
    ========================================================= */
 const faceTabsEl = document.getElementById("faceTabs");
-FACES.forEach(f=>{
+FACE_GROUPS.forEach(g=>{
   const btn = document.createElement("button");
-  btn.textContent = f.label;
-  btn.dataset.face = f.key;
-  if(f.key===selectedFace) btn.classList.add("active");
+  btn.textContent = g.label;
+  btn.dataset.group = g.key;
+  if(g.key===selectedGroup) btn.classList.add("active");
   btn.addEventListener("click", ()=>{
-    selectedFace = f.key;
-    [...faceTabsEl.children].forEach(b=>b.classList.toggle("active", b.dataset.face===f.key));
+    selectedGroup = g.key;
+    [...faceTabsEl.children].forEach(b=>b.classList.toggle("active", b.dataset.group===g.key));
     renderEditor();
   });
   faceTabsEl.appendChild(btn);
@@ -723,6 +991,7 @@ SHINDO_ORDER.forEach(k=>{
   const btn = document.createElement("button");
   btn.textContent = SHINDO_LABEL[k];
   btn.dataset.shindo = k;
+  if(SHINDO_EXAMPLES[k]) btn.dataset.tip = SHINDO_EXAMPLES[k];
   if(k===currentShindo) btn.classList.add("active");
   btn.addEventListener("click", ()=>{
     currentShindo = k;
@@ -737,6 +1006,8 @@ const modeBadge = document.getElementById("modeBadge");
 
 startBtn.addEventListener("click", ()=>{
   if(collapsed){ setMessage("倒壊しました。「編集モードに戻る」でリセットしてください。"); return; }
+  ensureAudio();
+  startBtn.classList.remove("clear-highlight");
   if(mode==="edit"){
     resetRunOnly();
     mode = "sim";
@@ -752,8 +1023,10 @@ function resetRunOnly(){
     n.x=n.baseX; n.y=n.baseY; n.z=n.baseZ; n.px=n.x; n.py=n.y; n.pz=n.z;
   }
   for(const s of sticks){ s.damage=0; s.broken=false; s.strain=0; s.stressRatio=0; }
-  quakeTime=0; runTime=0; collapsed=false; excitationLevel=0; groundX=0; prevGroundX=0;
+  quakeTime=0; runTime=0; collapsed=false; cleared=false; excitationLevel=0; groundX=0; prevGroundX=0;
+  crumbleTime=0; crumbleFrom=null; crumbleTargetY=null;
   storyDrift={floor1:0,floor2:0}; maxBraceStress=0; judgeText="未実施";
+  startBtn.classList.remove("clear-highlight");
 }
 
 resetBtn.addEventListener("click", ()=>{
@@ -772,7 +1045,7 @@ document.querySelectorAll(".presets button").forEach(btn=>{
     const p = btn.dataset.preset;
     if(p==="none") for(const b of bays) setBayState(b,"none");
     if(p==="all") for(const b of bays) setBayState(b,"x");
-    if(p==="backopen") for(const b of bays) setBayState(b, b.face==="back" ? "none" : "x");
+    if(p==="backopen") for(const b of bays) setBayState(b, (b.face==="front"||b.face==="back") ? "x" : "none");
     if(p==="floor2only") for(const b of bays) setBayState(b, b.story===2 ? "x" : "none");
     renderEditor();
     updateStatusPanel();
@@ -790,7 +1063,9 @@ function setMessage(t){
 
 function updateStatusPanel(){
   document.getElementById("stJudge").textContent = judgeText;
-  document.getElementById("stJudge").style.color = collapsed ? "var(--danger)" : (judgeText==="安定"?"var(--ok)":"inherit");
+  document.getElementById("stJudge").style.color = collapsed ? "var(--danger)" : (cleared||judgeText==="安定"?"var(--ok)":"inherit");
+  document.getElementById("stClear").textContent = cleared ? "クリア！" : (collapsed ? "－" : "未達成");
+  document.getElementById("stClear").style.color = cleared ? "var(--ok)" : "inherit";
   document.getElementById("stTime").textContent = runTime.toFixed(1)+" s";
   document.getElementById("stDrift1").textContent = (storyDrift.floor1*100).toFixed(1)+"%";
   document.getElementById("stDrift2").textContent = (storyDrift.floor2*100).toFixed(1)+"%";
@@ -799,8 +1074,10 @@ function updateStatusPanel(){
   document.getElementById("stBraceCount").textContent = count+" / "+bays.length;
 
   const hud = document.getElementById("hud");
+  const judgeLine = collapsed ? "<span class='collapsed'>倒壊！</span>" : judgeText;
   hud.innerHTML =
-    "<div><b>"+SHINDO_LABEL[currentShindo]+"</b>　"+(collapsed?"<span class='collapsed'>倒壊！</span>":judgeText)+"</div>"+
+    "<div><b>"+SHINDO_LABEL[currentShindo]+"</b>　"+judgeLine+"</div>"+
+    (cleared ? "<div style='color:var(--ok);font-weight:bold;'>10秒耐久クリア！</div>" : "")+
     "<div>経過 "+runTime.toFixed(1)+" s</div>"+
     "<div>1F変形 "+(storyDrift.floor1*100).toFixed(1)+"%　2F変形 "+(storyDrift.floor2*100).toFixed(1)+"%</div>";
 }
@@ -813,12 +1090,27 @@ function frame(now){
   let dt = (now-lastFrameT)/1000;
   lastFrameT = now;
   dt = Math.min(dt, 0.05);
-  if(running && !collapsed){
+  const crumbling = collapsed && crumbleTime < CRUMBLE_DURATION;
+  if(running && (!collapsed || crumbling)){
+    const wasCollapsed = collapsed;
     accumulator += dt;
     let guard=0;
     while(accumulator>=FIXED_DT && guard<10){ physicsStep(FIXED_DT); accumulator-=FIXED_DT; runTime+=FIXED_DT; guard++; }
-    if(collapsed) running=false, startBtn.textContent="開始";
+    if(!wasCollapsed && collapsed){
+      playCollapseThud(); // 倒壊が確定した瞬間に一度だけ鳴らす
+    }
+    if(collapsed && crumbleTime>=CRUMBLE_DURATION){
+      running=false; startBtn.textContent="開始";
+    } else if(!collapsed && !cleared && runTime>=CLEAR_TIME){
+      cleared = true;
+      running = false;
+      startBtn.textContent = "再開";
+      startBtn.classList.add("clear-highlight");
+      judgeText = "耐えた！（10秒クリア）";
+      setMessage(CLEAR_TIME+"秒間、倒壊せずに耐えました！ 続けて様子を見る場合は「再開」を押してください。");
+    }
   }
+  updateRumble();
   renderView();
   updateStatusPanel();
   requestAnimationFrame(frame);
