@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>木造軸組 耐震シミュレーター v1.0（3D）</title>
+<style>
+  :root{
+    --bg:#f1eadb; --panel:#fffdf8; --ink:#3a332a; --sub:#78705f;
+    --accent:#b97900; --accent2:#075da8; --danger:#c94538; --ok:#2e7d4f;
+    --line:#d8cdb4;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+    color:var(--ink); background:radial-gradient(circle at top,#fffaf0 0%,var(--bg) 72%);
+    min-height:100vh;
+  }
+  header{padding:14px 20px 6px; text-align:center;}
+  header h1{margin:0 0 4px; font-size:1.35rem;}
+  header p{margin:0; color:var(--sub); font-size:.85rem;}
+  .app{max-width:1400px; margin:0 auto; padding:8px 14px 24px;}
+  .main{display:flex; flex-wrap:wrap; gap:12px; align-items:flex-start;}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:12px; box-shadow:0 2px 8px rgba(80,60,20,.06);
+  }
+  .editor-panel{flex:1 1 320px; min-width:300px;}
+  .view-panel{flex:2 1 480px; min-width:360px;}
+  .control-panel{flex:1 1 260px; min-width:250px;}
+  h2{font-size:.95rem; margin:0 0 8px; color:var(--ink); border-bottom:1px solid var(--line); padding-bottom:6px;}
+  .tabs{display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap;}
+  .tabs button{
+    flex:1; padding:6px 4px; font-size:.8rem; border:1px solid var(--line); background:#fff;
+    border-radius:6px; cursor:pointer; color:var(--ink);
+  }
+  .tabs button.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+  #editorCanvas{width:100%; height:280px; display:block; background:#fffaf0; border:1px solid var(--line); border-radius:8px; cursor:pointer; touch-action:none;}
+  .legend{display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:.75rem; color:var(--sub);}
+  .legend span{display:inline-flex; align-items:center; gap:4px;}
+  .swatch{width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid rgba(0,0,0,.2);}
+  .presets{margin-top:12px; display:flex; flex-direction:column; gap:6px;}
+  .presets button, .btnrow button{
+    padding:7px 8px; font-size:.8rem; border:1px solid var(--line); background:#fff;
+    border-radius:6px; cursor:pointer; color:var(--ink);
+  }
+  .presets button:hover, .btnrow button:hover{background:#fff3e0;}
+  #viewCanvas{width:100%; height:520px; display:block; background:linear-gradient(#eaf3fb,#f7f2e6 70%); border:1px solid var(--line); border-radius:8px; touch-action:none; cursor:grab;}
+  .view-wrap{position:relative;}
+  .hud{
+    position:absolute; top:10px; left:10px; background:rgba(255,253,248,.9);
+    border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:.78rem; line-height:1.5;
+    pointer-events:none; min-width:150px;
+  }
+  .hud b{color:var(--accent);}
+  .hud .collapsed{color:var(--danger); font-weight:bold;}
+  .shindo-select{display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:10px;}
+  .shindo-select button{
+    padding:8px 2px; font-size:.8rem; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer;
+  }
+  .shindo-select button.active{background:var(--accent2); color:#fff; border-color:var(--accent2);}
+  .btnrow{display:flex; flex-direction:column; gap:6px; margin-bottom:12px;}
+  .btnrow .primary{background:var(--accent); color:#fff; border-color:var(--accent); font-weight:bold;}
+  .status-table{width:100%; border-collapse:collapse; font-size:.8rem;}
+  .status-table td{padding:4px 2px; border-bottom:1px dashed var(--line);}
+  .status-table td:first-child{color:var(--sub);}
+  .status-table td:last-child{text-align:right; font-weight:bold;}
+  #message{max-width:1400px; margin:6px auto 0; padding:8px 20px; text-align:center; color:var(--sub); font-size:.82rem; min-height:1.2em;}
+  .mode-badge{display:inline-block; padding:2px 8px; border-radius:10px; font-size:.72rem; margin-left:6px;}
+  .mode-badge.edit{background:#e4f0ff; color:var(--accent2);}
+  .mode-badge.sim{background:#ffe9d6; color:var(--accent);}
+  footer.credit{text-align:center; color:var(--sub); font-size:.72rem; margin-top:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>木造軸組 耐震シミュレーター <span id="modeBadge" class="mode-badge edit">編集モード</span></h1>
+  <p>2D画面で筋交いを設置・交換・撤去 → 地震シミュレーションは3Dで実行し、三次元的に倒壊するか耐えるかを確認します。</p>
+</header>
+<div class="app">
+  <div class="main">
+    <div class="panel editor-panel">
+      <h2>① 筋交いエディタ（2D・壁面ごと）</h2>
+      <div class="tabs" id="faceTabs"></div>
+      <canvas id="editorCanvas"></canvas>
+      <div class="legend">
+        <span><span class="swatch" style="background:#fff;border-style:dashed;"></span>なし</span>
+        <span><span class="swatch" style="background:#b97900;"></span>片筋交い</span>
+        <span><span class="swatch" style="background:#075da8;"></span>X字筋交い</span>
+      </div>
+      <p style="font-size:.75rem;color:var(--sub);margin:8px 0 0;">マス目をクリックすると なし→／→＼→Ｘ→なし の順で切り替わります。</p>
+      <div class="presets">
+        <div style="font-size:.8rem;color:var(--sub);margin-top:6px;">内部テスト（配置プリセット）</div>
+        <button data-preset="none">① 筋交いなし（四角形骨組みのみ）</button>
+        <button data-preset="floor2only">② 2階だけX字配置（1階が弱い＝ピロティ崩壊）</button>
+        <button data-preset="backopen">③ 3方向だけX字配置（背面だけ無筋交い＝偏り）</button>
+        <button data-preset="all">④ 全ベイX字配置（良配置）</button>
+      </div>
+    </div>
+
+    <div class="panel view-panel">
+      <h2>② 3Dシミュレーション</h2>
+      <div class="view-wrap">
+        <canvas id="viewCanvas"></canvas>
+        <div class="hud" id="hud"></div>
+      </div>
+      <p style="font-size:.75rem;color:var(--sub);margin:8px 0 0;">ドラッグで視点回転、ホイールでズーム。開始すると①の配置のまま3Dで加振します。</p>
+    </div>
+
+    <div class="panel control-panel">
+      <h2>③ 震度と操作</h2>
+      <div class="shindo-select" id="shindoSelect"></div>
+      <div class="btnrow">
+        <button id="startBtn" class="primary">開始</button>
+        <button id="resetBtn">編集モードに戻る（リセット）</button>
+        <button id="camResetBtn">カメラをリセット</button>
+      </div>
+      <h2>状態</h2>
+      <table class="status-table">
+        <tr><td>判定</td><td id="stJudge">未実施</td></tr>
+        <tr><td>経過時間</td><td id="stTime">0.0 s</td></tr>
+        <tr><td>1階 層間変形</td><td id="stDrift1">0%</td></tr>
+        <tr><td>2階 層間変形</td><td id="stDrift2">0%</td></tr>
+        <tr><td>筋交い最大応力</td><td id="stStress">0%</td></tr>
+        <tr><td>設置済み筋交い</td><td id="stBraceCount">0 / 12</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+<div id="message"></div>
+<footer class="credit">教育用の簡易疑似物理モデルです。建築基準法上の壁量計算・許容応力度計算とは異なります。</footer>
+
+<script>
+(function(){
+"use strict";
+
+/* =========================================================
+   1. 定数・設定
+   ========================================================= */
+const CFG = { xSpans:2, zSpans:1, span:1.8, storyH:2.7, massFloor:1.0, massRoof:1.2, massBase:1 };
+const FACES = [
+  {key:"front", label:"前面"},
+  {key:"back",  label:"背面"},
+  {key:"left",  label:"左妻"},
+  {key:"right", label:"右妻"},
+];
+const GRAVITY = 9.8, DAMPING = 0.986, FIXED_DT = 1/120, SOLVER_ITERS = 20;
+const DRIFT_COLOR_LIMIT = 0.11, DRIFT_COLLAPSE_LIMIT = 0.4, HEIGHT_LOSS_COLLAPSE = 0.32;
+const MIN_COLLAPSE_TIME = 1.0, IMPULSE_SCALE = 3.0;
+const EPS = 1e-6;
+
+const SHINDO_PRESETS = {
+  "1": {amplitude:0.015, frequency:1.2, impulse:0.055, duration:18, strongDuration:4},
+  "2": {amplitude:0.03,  frequency:1.3, impulse:0.09,  duration:20, strongDuration:5},
+  "3": {amplitude:0.05,  frequency:1.4, impulse:0.14,  duration:22, strongDuration:6},
+  "4": {amplitude:0.08,  frequency:1.5, impulse:0.2,   duration:24, strongDuration:8},
+  "5w":{amplitude:0.12,  frequency:1.6, impulse:0.3,   duration:28, strongDuration:10},
+  "5s":{amplitude:0.17,  frequency:1.75,impulse:0.42,  duration:30, strongDuration:12},
+  "6w":{amplitude:0.24,  frequency:1.9, impulse:0.58,  duration:34, strongDuration:15},
+  "6s":{amplitude:0.32,  frequency:2.05,impulse:0.75,  duration:38, strongDuration:18},
+  "7": {amplitude:0.42,  frequency:2.2, impulse:0.95,  duration:45, strongDuration:22},
+};
+const SHINDO_ORDER = ["1","2","3","4","5w","5s","6w","6s","7"];
+const SHINDO_LABEL = {"1":"震度1","2":"震度2","3":"震度3","4":"震度4","5w":"震度5弱","5s":"震度5強","6w":"震度6弱","6s":"震度6強","7":"震度7"};
+
+/* =========================================================
+   2. 状態
+   ========================================================= */
+let nodes = new Map();
+let sticks = [];
+let bays = [];
+let stickIdSeq = 0;
+let selectedFace = "front";
+let currentShindo = "1";
+let mode = "edit"; // 'edit' | 'sim'
+let running = false;
+let collapsed = false;
+let excitationMode = "earthquake"; // 'earthquake' | 'continuous'
+let quakeTime = 0, runTime = 0, excitationLevel = 0;
+let groundX = 0, prevGroundX = 0;
+let storyDrift = {floor1:0, floor2:0};
+let maxBraceStress = 0;
+let accumulator = 0, lastFrameT = null;
+let judgeText = "未実施";
+
+const roofHeight = CFG.storyH*2;
+const center = {x:(CFG.xSpans*CFG.span)/2, y:CFG.storyH, z:(CFG.zSpans*CFG.span)/2};
+
+/* =========================================================
+   3. モデル生成（ノード・部材・壁ベイ）
+   ========================================================= */
+function nk(level,ix,iz){ return level+"_"+ix+"_"+iz; }
+
+function dist3(a,b){ return Math.hypot(b.x-a.x, b.y-a.y, b.z-a.z); }
+
+function stickDefaults(type){
+  switch(type){
+    case "column":    return {maxTension:0.05, maxCompression:-0.05, tensionK:0.92, compressionK:0.92, brittle:false, damageRate:0};
+    case "beam":      return {maxTension:0.05, maxCompression:-0.05, tensionK:0.9,  compressionK:0.9,  brittle:false, damageRate:0};
+    case "diaphragm": return {maxTension:0.05, maxCompression:-0.05, tensionK:0.88, compressionK:0.88, brittle:false, damageRate:0};
+    case "brace":     return {maxTension:0.045,maxCompression:-0.012,tensionK:1.0,  compressionK:0.08, brittle:true,  damageRate:0.55};
+  }
+}
+
+function addStick(aKey,bKey,type,floor,extra){
+  const a = nodes.get(aKey), b = nodes.get(bKey);
+  // 拘束の自然長は「歪んでいない基準形状」から常に計算する（実行中の変形状態から
+  // 計算すると、シミュレーション後に筋交いを追加した際に誤った自然長が焼き付いてしまう）
+  const rl = Math.hypot(b.baseX-a.baseX, b.baseY-a.baseY, b.baseZ-a.baseZ);
+  const s = Object.assign({
+    id:"s"+(stickIdSeq++), a:aKey, b:bKey, type, floor,
+    restLength:rl, damage:0, broken:false, strain:0, stressRatio:0,
+  }, stickDefaults(type), extra||{});
+  sticks.push(s);
+  return s.id;
+}
+
+function makeBay(face, span, story, lowA, lowB, highA, highB){
+  return {id:face+"_"+story+"_"+span, face, span, story, lowA, lowB, highA, highB, state:"none", stickIds:[]};
+}
+
+function buildModel(){
+  nodes = new Map();
+  sticks = [];
+  stickIdSeq = 0;
+  const xN = CFG.xSpans, zN = CFG.zSpans;
+  for(let level=0; level<=2; level++){
+    for(let ix=0; ix<=xN; ix++){
+      for(let iz=0; iz<=zN; iz++){
+        const x = ix*CFG.span, y = level*CFG.storyH, z = iz*CFG.span;
+        const fixed = level===0;
+        const mass = level===0 ? CFG.massBase : (level===1 ? CFG.massFloor : CFG.massRoof);
+        // 微小なノイズでソルバの数値的縮退を避ける
+        const jitter = fixed ? 0 : (Math.random()-0.5)*0.0008;
+        nodes.set(nk(level,ix,iz), {
+          id:nk(level,ix,iz), level, ix, iz,
+          x:x+jitter, y, z:z+jitter,
+          px:x+jitter, py:y, pz:z+jitter,
+          baseX:x, baseY:y, baseZ:z,
+          fixed, mass, invMass: fixed?0:1/mass,
+        });
+      }
+    }
+  }
+  // 柱
+  for(let level=0; level<2; level++)
+    for(let ix=0; ix<=xN; ix++)
+      for(let iz=0; iz<=zN; iz++)
+        addStick(nk(level,ix,iz), nk(level+1,ix,iz), "column", level+1);
+  // 梁・床の水平構面（火打ち／常設・生徒は編集不可）
+  for(let level=1; level<=2; level++){
+    for(let iz=0; iz<=zN; iz++) for(let ix=0; ix<xN; ix++)
+      addStick(nk(level,ix,iz), nk(level,ix+1,iz), "beam", level);
+    for(let ix=0; ix<=xN; ix++) for(let iz=0; iz<zN; iz++)
+      addStick(nk(level,ix,iz), nk(level,ix,iz+1), "beam", level);
+    for(let ix=0; ix<xN; ix++) for(let iz=0; iz<zN; iz++){
+      addStick(nk(level,ix,iz),   nk(level,ix+1,iz+1), "diaphragm", level);
+      addStick(nk(level,ix+1,iz), nk(level,ix,iz+1),   "diaphragm", level);
+    }
+  }
+  // 壁ベイ（筋交い設置枠）
+  bays = [];
+  for(let story=1; story<=2; story++){
+    const lo=story-1, hi=story;
+    for(let ix=0; ix<xN; ix++){
+      bays.push(makeBay("front", ix, story, nk(lo,ix,0),  nk(lo,ix+1,0),  nk(hi,ix,0),  nk(hi,ix+1,0)));
+      bays.push(makeBay("back",  ix, story, nk(lo,ix,zN), nk(lo,ix+1,zN), nk(hi,ix,zN), nk(hi,ix+1,zN)));
+    }
+    for(let iz=0; iz<zN; iz++){
+      bays.push(makeBay("left",  iz, story, nk(lo,0,iz),  nk(lo,0,iz+1),  nk(hi,0,iz),  nk(hi,0,iz+1)));
+      bays.push(makeBay("right", iz, story, nk(lo,xN,iz), nk(lo,xN,iz+1), nk(hi,xN,iz), nk(hi,xN,iz+1)));
+    }
+  }
+}
+
+function setBayState(bay, newState){
+  if(bay.stickIds.length){
+    const rm = new Set(bay.stickIds);
+    sticks = sticks.filter(s=>!rm.has(s.id));
+    bay.stickIds = [];
+  }
+  bay.state = newState;
+  if(newState==="slash" || newState==="x")
+    bay.stickIds.push(addStick(bay.lowA, bay.highB, "brace", bay.story, {face:bay.face, span:bay.span, dir:"/"}));
+  if(newState==="backslash" || newState==="x")
+    bay.stickIds.push(addStick(bay.lowB, bay.highA, "brace", bay.story, {face:bay.face, span:bay.span, dir:"\\"}));
+}
+
+function cycleBay(bay){
+  const order = ["none","slash","backslash","x"];
+  const next = order[(order.indexOf(bay.state)+1) % order.length];
+  setBayState(bay, next);
+}
+
+/* =========================================================
+   4. 物理（3D Verlet + PBD風拘束）
+   ========================================================= */
+function resetPhysicsState(){
+  for(const n of nodes.values()){
+    n.x = n.baseX; n.y = n.baseY; n.z = n.baseZ;
+    n.px = n.x; n.py = n.y; n.pz = n.z;
+  }
+  for(const s of sticks){ s.damage = 0; s.broken = false; s.strain = 0; s.stressRatio = 0; }
+  quakeTime = 0; runTime = 0; running = false; collapsed = false;
+  excitationLevel = 0; groundX = 0; prevGroundX = 0;
+  storyDrift = {floor1:0, floor2:0}; maxBraceStress = 0;
+  judgeText = "未実施";
+  mode = "edit";
+}
+
+function smoothstep(e0,e1,x){ const t=Math.max(0,Math.min(1,(x-e0)/Math.max(EPS,e1-e0))); return t*t*(3-2*t); }
+
+function quakeEnvelope(t, p){
+  const attack=1.6, strong=p.strongDuration||6, total=p.duration||24, decayStart=attack+strong;
+  if(t<0) return 0;
+  if(t<attack) return smoothstep(0,attack,t);
+  if(t<decayStart) return 1;
+  if(t<total){ const k=1-smoothstep(decayStart,total,t); return Math.max(0.08,k); }
+  return 0;
+}
+
+function groundWave(t,p){
+  return p.amplitude * (
+    Math.sin(2*Math.PI*p.frequency*t) +
+    0.32*Math.sin(2*Math.PI*p.frequency*1.7*t + 0.8) +
+    0.18*Math.sin(2*Math.PI*p.frequency*0.43*t + 1.7)
+  );
+}
+
+function updateGroundMotion(dt){
+  const p = SHINDO_PRESETS[currentShindo];
+  if(running && !collapsed){
+    quakeTime += dt;
+    prevGroundX = groundX;
+    const env = excitationMode==="continuous" ? 1 : quakeEnvelope(quakeTime,p);
+    excitationLevel = env;
+    groundX = env>0 ? groundWave(quakeTime,p)*env : 0;
+    if(excitationMode==="earthquake" && quakeTime>=p.duration){ groundX=0; excitationLevel=0; }
+  } else {
+    prevGroundX = 0; groundX = 0; excitationLevel = 0;
+  }
+  for(const n of nodes.values()) if(n.fixed){
+    n.x = n.baseX + groundX; n.y = n.baseY; n.z = n.baseZ;
+    n.px = n.x; n.py = n.y; n.pz = n.z;
+  }
+  if(running && !collapsed && excitationLevel>0){
+    const delta = groundX - prevGroundX;
+    for(const n of nodes.values()){
+      if(n.fixed) continue;
+      const hf = Math.max(0.15, Math.min(1.3, n.baseY/roofHeight));
+      n.x -= delta * IMPULSE_SCALE * p.impulse * hf;
+    }
+  }
+}
+
+function integrate(dt){
+  for(const n of nodes.values()){
+    if(n.fixed) continue;
+    const vx=(n.x-n.px)*DAMPING, vy=(n.y-n.py)*DAMPING, vz=(n.z-n.pz)*DAMPING;
+    n.px=n.x; n.py=n.y; n.pz=n.z;
+    n.x += vx;
+    n.y += vy - GRAVITY*dt*dt;
+    n.z += vz;
+  }
+}
+
+function solveStick(s){
+  if(s.broken) return;
+  const a = nodes.get(s.a), b = nodes.get(s.b);
+  const dx=b.x-a.x, dy=b.y-a.y, dz=b.z-a.z;
+  const len = Math.hypot(dx,dy,dz) || EPS;
+  const diff = len - s.restLength;
+  const strain = diff / s.restLength;
+  const k = strain>=0 ? s.tensionK : s.compressionK;
+  const invSum = a.invMass + b.invMass;
+  if(invSum<=0) return;
+  const corr = (diff/len) * k / invSum;
+  const cx=dx*corr, cy=dy*corr, cz=dz*corr;
+  if(a.invMass>0){ a.x+=cx*a.invMass; a.y+=cy*a.invMass; a.z+=cz*a.invMass; }
+  if(b.invMass>0){ b.x-=cx*b.invMass; b.y-=cy*b.invMass; b.z-=cz*b.invMass; }
+}
+
+function solveConstraints(){
+  for(let it=0; it<SOLVER_ITERS; it++){
+    for(const s of sticks) solveStick(s);
+    for(const n of nodes.values()){
+      if(!n.fixed && n.y<0){ n.y=0; n.py=Math.min(n.py,0); }
+    }
+  }
+}
+
+function updateDamageAndStress(dt){
+  maxBraceStress = 0;
+  for(const s of sticks){
+    const a = nodes.get(s.a), b = nodes.get(s.b);
+    const len = dist3(a,b);
+    const strain = (len - s.restLength) / s.restLength;
+    s.strain = strain;
+    if(s.type!=="brace"){
+      const denom = Math.max(Math.abs(s.maxTension), Math.abs(s.maxCompression));
+      s.stressRatio = Math.max(0, Math.min(1.4, Math.abs(strain)/denom));
+      continue;
+    }
+    if(s.broken){ s.stressRatio = 1.3; continue; }
+    let over = 0;
+    if(strain > s.maxTension) over = (strain - s.maxTension)/Math.abs(s.maxTension);
+    else if(strain < s.maxCompression) over = (strain - s.maxCompression)/Math.abs(s.maxCompression);
+    if(over>0) s.damage = Math.min(1.4, s.damage + over*s.damageRate*dt);
+    if(s.damage>=1) s.broken = true;
+    const denom = Math.max(Math.abs(s.maxTension), Math.abs(s.maxCompression));
+    s.stressRatio = Math.max(0, Math.min(1.4, Math.max(Math.abs(strain)/denom, s.damage)));
+    maxBraceStress = Math.max(maxBraceStress, s.stressRatio);
+  }
+  // 柱の傾き（層間変形の可視化用）
+  for(const s of sticks){
+    if(s.type!=="column") continue;
+    const a = nodes.get(s.a), b = nodes.get(s.b);
+    const planDist = Math.hypot(b.x-a.x, b.z-a.z);
+    const tilt = planDist / s.restLength;
+    s.stressRatio = Math.max(s.stressRatio, Math.min(1.4, tilt/DRIFT_COLOR_LIMIT));
+  }
+}
+
+function maxColumnTilt(floor){
+  let m = 0;
+  for(const s of sticks){
+    if(s.type!=="column" || s.floor!==floor) continue;
+    const a = nodes.get(s.a), b = nodes.get(s.b);
+    const planDist = Math.hypot(b.x-a.x, b.z-a.z);
+    m = Math.max(m, planDist / s.restLength);
+  }
+  return m;
+}
+
+function updateStoryDriftAndCollapse(){
+  storyDrift.floor1 = maxColumnTilt(1);
+  storyDrift.floor2 = maxColumnTilt(2);
+  let roofSum=0, roofCount=0;
+  for(const n of nodes.values()) if(n.level===2){ roofSum+=n.y; roofCount++; }
+  const avgRoofY = roofCount ? roofSum/roofCount : roofHeight;
+  const heightLossRatio = 1 - avgRoofY/roofHeight;
+  if(!collapsed && runTime>MIN_COLLAPSE_TIME){
+    if(storyDrift.floor1>DRIFT_COLLAPSE_LIMIT || storyDrift.floor2>DRIFT_COLLAPSE_LIMIT || heightLossRatio>HEIGHT_LOSS_COLLAPSE){
+      collapsed = true;
+      judgeText = "倒壊";
+    }
+  }
+  if(!collapsed && running){
+    const worst = Math.max(storyDrift.floor1, storyDrift.floor2, maxBraceStress);
+    judgeText = worst>0.55 ? "危険（大破）" : worst>0.25 ? "損傷あり" : "安定";
+  }
+}
+
+function physicsStep(dt){
+  integrate(dt);
+  updateGroundMotion(dt);
+  solveConstraints();
+  updateDamageAndStress(dt);
+  updateStoryDriftAndCollapse();
+}
+
+/* =========================================================
+   5. カメラ・投影（自前・正射投影）
+   ========================================================= */
+let cam = {yaw:0.7, pitch:0.38, scale:75, panX:0, panY:40};
+
+function project(n){
+  const cx=n.x-center.x, cy=n.y-center.y, cz=n.z-center.z;
+  const cosY=Math.cos(cam.yaw), sinY=Math.sin(cam.yaw);
+  const x1=cx*cosY+cz*sinY, z1=-cx*sinY+cz*cosY, y1=cy;
+  const cosP=Math.cos(cam.pitch), sinP=Math.sin(cam.pitch);
+  const y2=y1*cosP-z1*sinP, z2=y1*sinP+z1*cosP;
+  return {
+    sx: viewCanvas.clientWidth/2 + x1*cam.scale + cam.panX,
+    sy: viewCanvas.clientHeight/2 - y2*cam.scale + cam.panY,
+    depth: z2,
+  };
+}
+
+/* =========================================================
+   6. 描画（3Dビュー）
+   ========================================================= */
+const viewCanvas = document.getElementById("viewCanvas");
+const vctx = viewCanvas.getContext("2d");
+
+function resizeCanvas(canvas){
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1,Math.round(r.width*dpr)), h = Math.max(1,Math.round(r.height*dpr));
+  if(canvas.width!==w || canvas.height!==h){ canvas.width=w; canvas.height=h; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function stressColor(r, base){
+  if(r < 0.15) return base;
+  const heat = Math.max(0, Math.min(1, (r-0.15)/0.9));
+  const hue = 55 - heat*55;
+  const light = 50 - heat*10;
+  return `hsl(${hue}, 88%, ${light}%)`;
+}
+
+function memberBaseColor(type){
+  if(type==="column") return "#8a6a45";
+  if(type==="beam") return "#6f5636";
+  if(type==="brace") return "#0b4f8a";
+  return "#c9a15a";
+}
+
+function drawThickLine(ctx, p1, p2, width, color){
+  const dx=p2.sx-p1.sx, dy=p2.sy-p1.sy;
+  const len=Math.hypot(dx,dy)||EPS;
+  const nx=-dy/len*width/2, ny=dx/len*width/2;
+  ctx.beginPath();
+  ctx.moveTo(p1.sx+nx,p1.sy+ny);
+  ctx.lineTo(p2.sx+nx,p2.sy+ny);
+  ctx.lineTo(p2.sx-nx,p2.sy-ny);
+  ctx.lineTo(p1.sx-nx,p1.sy-ny);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,.25)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function renderView(){
+  resizeCanvas(viewCanvas);
+  const w = viewCanvas.clientWidth, h = viewCanvas.clientHeight;
+  vctx.clearRect(0,0,w,h);
+
+  // 地面（加振台）
+  const groundPts = [
+    {x:-1.2,y:0,z:-1.2},{x:CFG.xSpans*CFG.span+1.2,y:0,z:-1.2},
+    {x:CFG.xSpans*CFG.span+1.2,y:0,z:CFG.zSpans*CFG.span+1.2},{x:-1.2,y:0,z:CFG.zSpans*CFG.span+1.2},
+  ].map(p=>project({x:p.x+((running)?groundX:0)*0+p.x*0+p.x, y:p.y, z:p.z})); // placeholder, replaced below
+
+  // 実際の地面（加振に合わせて動く帯）
+  const gY = 0;
+  const gx0=-1.2+groundX, gx1=CFG.xSpans*CFG.span+1.2+groundX;
+  const gz0=-1.2, gz1=CFG.zSpans*CFG.span+1.2;
+  const gp = [
+    project({x:gx0,y:gY,z:gz0}), project({x:gx1,y:gY,z:gz0}),
+    project({x:gx1,y:gY,z:gz1}), project({x:gx0,y:gY,z:gz1}),
+  ];
+  vctx.beginPath();
+  vctx.moveTo(gp[0].sx,gp[0].sy);
+  for(let i=1;i<gp.length;i++) vctx.lineTo(gp[i].sx,gp[i].sy);
+  vctx.closePath();
+  vctx.fillStyle = "#e4dcc4";
+  vctx.fill();
+  vctx.strokeStyle = "#c8bc98";
+  vctx.stroke();
+
+  // 描画アイテム一覧（床スラブ＋部材）を深度でソート
+  const items = [];
+  for(let level=1; level<=2; level++){
+    for(let ix=0; ix<CFG.xSpans; ix++) for(let iz=0; iz<CFG.zSpans; iz++){
+      const keys = [nk(level,ix,iz), nk(level,ix+1,iz), nk(level,ix+1,iz+1), nk(level,ix,iz+1)];
+      const pts = keys.map(k=>project(nodes.get(k)));
+      const depth = pts.reduce((s,p)=>s+p.depth,0)/pts.length;
+      items.push({depth, draw:()=>{
+        vctx.beginPath();
+        vctx.moveTo(pts[0].sx,pts[0].sy);
+        for(let i=1;i<pts.length;i++) vctx.lineTo(pts[i].sx,pts[i].sy);
+        vctx.closePath();
+        vctx.fillStyle = level===2 ? "rgba(190,150,90,.4)" : "rgba(210,190,140,.4)";
+        vctx.fill();
+      }});
+    }
+  }
+  for(const s of sticks){
+    if(s.type==="diaphragm") continue; // 床スラブとして表現済み。線は描かない
+    const a=nodes.get(s.a), b=nodes.get(s.b);
+    const pa=project(a), pb=project(b);
+    const depth=(pa.depth+pb.depth)/2;
+    const width = s.type==="column" ? 7 : s.type==="beam" ? 6 : 3.4;
+    let color = memberBaseColor(s.type);
+    if(mode==="sim") color = stressColor(s.stressRatio||0, color);
+    if(s.type==="brace" && s.broken){ color = "#999"; }
+    items.push({depth, draw:()=>{
+      if(s.type==="brace" && s.broken){
+        vctx.save(); vctx.setLineDash([4,4]);
+        vctx.strokeStyle = color; vctx.lineWidth = 2;
+        vctx.beginPath(); vctx.moveTo(pa.sx,pa.sy); vctx.lineTo(pb.sx,pb.sy); vctx.stroke();
+        vctx.restore();
+      } else {
+        drawThickLine(vctx, pa, pb, width, color);
+      }
+    }});
+  }
+  items.sort((a,b)=>a.depth-b.depth);
+  for(const it of items) it.draw();
+
+  if(collapsed){
+    vctx.fillStyle = "rgba(201,69,56,.12)";
+    vctx.fillRect(0,0,w,h);
+  }
+}
+
+/* =========================================================
+   7. 描画（2Dエディタ）
+   ========================================================= */
+const editorCanvas = document.getElementById("editorCanvas");
+const ectx = editorCanvas.getContext("2d");
+let editorBayRects = []; // {bay, x,y,w,h}
+
+function faceSpanCount(face){
+  return (face==="front"||face==="back") ? CFG.xSpans : CFG.zSpans;
+}
+
+function renderEditor(){
+  resizeCanvas(editorCanvas);
+  const w = editorCanvas.clientWidth, h = editorCanvas.clientHeight;
+  ectx.clearRect(0,0,w,h);
+  editorBayRects = [];
+
+  const spans = faceSpanCount(selectedFace);
+  const marginL=54, marginR=20, marginT=24, marginB=40;
+  const gridW = w-marginL-marginR, gridH = h-marginT-marginB;
+  const cellW = gridW/spans, cellH = gridH/2;
+
+  ectx.strokeStyle = "#c8bc98";
+  ectx.fillStyle = "#5a5142";
+  ectx.font = "11px sans-serif";
+  ectx.textAlign = "right";
+  ectx.fillText("2階", marginL-8, marginT+cellH/2+4);
+  ectx.fillText("1階", marginL-8, marginT+cellH*1.5+4);
+  ectx.textAlign = "center";
+
+  for(let story=1; story<=2; story++){
+    const rowIdx = story===2?0:1; // 2階を上に表示
+    for(let sp=0; sp<spans; sp++){
+      const bay = bays.find(b=>b.face===selectedFace && b.span===sp && b.story===story);
+      const x = marginL+sp*cellW, y = marginT+rowIdx*cellH;
+      ectx.strokeRect(x,y,cellW,cellH);
+      editorBayRects.push({bay, x,y,w:cellW,h:cellH});
+      drawBayState(x,y,cellW,cellH,bay.state);
+      ectx.fillStyle="#8a8168"; ectx.font="10px sans-serif";
+      ectx.fillText("スパン"+(sp+1), x+cellW/2, y+cellH-6);
+    }
+  }
+  // 通し柱ライン
+  ectx.strokeStyle = "#a8967a"; ectx.lineWidth=2;
+  for(let sp=0; sp<=spans; sp++){
+    const x = marginL+sp*cellW;
+    ectx.beginPath(); ectx.moveTo(x,marginT); ectx.lineTo(x,marginT+gridH); ectx.stroke();
+  }
+  ectx.lineWidth=1;
+}
+
+function drawBayState(x,y,w,h,state){
+  if(state==="none") return;
+  ectx.lineWidth = 3;
+  const pad=8;
+  if(state==="slash" || state==="x"){
+    ectx.strokeStyle = state==="x" ? "#075da8" : "#b97900";
+    ectx.beginPath(); ectx.moveTo(x+pad,y+h-pad); ectx.lineTo(x+w-pad,y+pad); ectx.stroke();
+  }
+  if(state==="backslash" || state==="x"){
+    ectx.strokeStyle = state==="x" ? "#075da8" : "#b97900";
+    ectx.beginPath(); ectx.moveTo(x+pad,y+pad); ectx.lineTo(x+w-pad,y+h-pad); ectx.stroke();
+  }
+  ectx.lineWidth = 1;
+}
+
+function bayAtPoint(mx,my){
+  for(const r of editorBayRects)
+    if(mx>=r.x && mx<=r.x+r.w && my>=r.y && my<=r.y+r.h) return r.bay;
+  return null;
+}
+
+editorCanvas.addEventListener("click", (e)=>{
+  if(mode!=="edit") { setMessage("編集は「編集モードに戻る」を押してから行えます。"); return; }
+  const rect = editorCanvas.getBoundingClientRect();
+  const mx = e.clientX-rect.left, my = e.clientY-rect.top;
+  const bay = bayAtPoint(mx,my);
+  if(bay){ cycleBay(bay); renderEditor(); updateStatusPanel(); }
+});
+
+/* =========================================================
+   8. カメラ操作（3Dビュー・ドラッグ回転／ホイールズーム）
+   ========================================================= */
+let dragging=false, dragLast=null;
+viewCanvas.addEventListener("pointerdown", (e)=>{ dragging=true; dragLast={x:e.clientX,y:e.clientY}; viewCanvas.setPointerCapture(e.pointerId); viewCanvas.style.cursor="grabbing"; });
+viewCanvas.addEventListener("pointermove", (e)=>{
+  if(!dragging) return;
+  const dx=e.clientX-dragLast.x, dy=e.clientY-dragLast.y;
+  dragLast={x:e.clientX,y:e.clientY};
+  cam.yaw += dx*0.008;
+  cam.pitch = Math.max(-1.3, Math.min(1.3, cam.pitch + dy*0.008));
+});
+viewCanvas.addEventListener("pointerup", ()=>{ dragging=false; viewCanvas.style.cursor="grab"; });
+viewCanvas.addEventListener("pointercancel", ()=>{ dragging=false; });
+viewCanvas.addEventListener("wheel", (e)=>{
+  e.preventDefault();
+  cam.scale = Math.max(20, Math.min(220, cam.scale - e.deltaY*0.08));
+}, {passive:false});
+
+document.getElementById("camResetBtn").addEventListener("click", ()=>{
+  cam = {yaw:0.7, pitch:0.38, scale:75, panX:0, panY:40};
+});
+
+/* =========================================================
+   9. UI 構築
+   ========================================================= */
+const faceTabsEl = document.getElementById("faceTabs");
+FACES.forEach(f=>{
+  const btn = document.createElement("button");
+  btn.textContent = f.label;
+  btn.dataset.face = f.key;
+  if(f.key===selectedFace) btn.classList.add("active");
+  btn.addEventListener("click", ()=>{
+    selectedFace = f.key;
+    [...faceTabsEl.children].forEach(b=>b.classList.toggle("active", b.dataset.face===f.key));
+    renderEditor();
+  });
+  faceTabsEl.appendChild(btn);
+});
+
+const shindoSelectEl = document.getElementById("shindoSelect");
+SHINDO_ORDER.forEach(k=>{
+  const btn = document.createElement("button");
+  btn.textContent = SHINDO_LABEL[k];
+  btn.dataset.shindo = k;
+  if(k===currentShindo) btn.classList.add("active");
+  btn.addEventListener("click", ()=>{
+    currentShindo = k;
+    [...shindoSelectEl.children].forEach(b=>b.classList.toggle("active", b.dataset.shindo===k));
+  });
+  shindoSelectEl.appendChild(btn);
+});
+
+const startBtn = document.getElementById("startBtn");
+const resetBtn = document.getElementById("resetBtn");
+const modeBadge = document.getElementById("modeBadge");
+
+startBtn.addEventListener("click", ()=>{
+  if(collapsed){ setMessage("倒壊しました。「編集モードに戻る」でリセットしてください。"); return; }
+  if(mode==="edit"){
+    resetRunOnly();
+    mode = "sim";
+    modeBadge.textContent = "シミュレーション中";
+    modeBadge.classList.remove("edit"); modeBadge.classList.add("sim");
+  }
+  running = !running;
+  startBtn.textContent = running ? "一時停止" : "再開";
+});
+
+function resetRunOnly(){
+  for(const n of nodes.values()){
+    n.x=n.baseX; n.y=n.baseY; n.z=n.baseZ; n.px=n.x; n.py=n.y; n.pz=n.z;
+  }
+  for(const s of sticks){ s.damage=0; s.broken=false; s.strain=0; s.stressRatio=0; }
+  quakeTime=0; runTime=0; collapsed=false; excitationLevel=0; groundX=0; prevGroundX=0;
+  storyDrift={floor1:0,floor2:0}; maxBraceStress=0; judgeText="未実施";
+}
+
+resetBtn.addEventListener("click", ()=>{
+  resetRunOnly();
+  running=false; mode="edit";
+  startBtn.textContent = "開始";
+  modeBadge.textContent = "編集モード";
+  modeBadge.classList.remove("sim"); modeBadge.classList.add("edit");
+  renderEditor();
+  setMessage("編集モードに戻りました。筋交いを編集できます。");
+});
+
+document.querySelectorAll(".presets button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    if(mode!=="edit"){ setMessage("編集は「編集モードに戻る」を押してから行えます。"); return; }
+    const p = btn.dataset.preset;
+    if(p==="none") for(const b of bays) setBayState(b,"none");
+    if(p==="all") for(const b of bays) setBayState(b,"x");
+    if(p==="backopen") for(const b of bays) setBayState(b, b.face==="back" ? "none" : "x");
+    if(p==="floor2only") for(const b of bays) setBayState(b, b.story===2 ? "x" : "none");
+    renderEditor();
+    updateStatusPanel();
+    setMessage("配置プリセットを適用しました。震度を選んで「開始」を押してください。");
+  });
+});
+
+const messageEl = document.getElementById("message");
+let msgTimer = null;
+function setMessage(t){
+  messageEl.textContent = t;
+  clearTimeout(msgTimer);
+  msgTimer = setTimeout(()=>{ messageEl.textContent=""; }, 4500);
+}
+
+function updateStatusPanel(){
+  document.getElementById("stJudge").textContent = judgeText;
+  document.getElementById("stJudge").style.color = collapsed ? "var(--danger)" : (judgeText==="安定"?"var(--ok)":"inherit");
+  document.getElementById("stTime").textContent = runTime.toFixed(1)+" s";
+  document.getElementById("stDrift1").textContent = (storyDrift.floor1*100).toFixed(1)+"%";
+  document.getElementById("stDrift2").textContent = (storyDrift.floor2*100).toFixed(1)+"%";
+  document.getElementById("stStress").textContent = (maxBraceStress*100).toFixed(0)+"%";
+  const count = bays.filter(b=>b.state!=="none").length;
+  document.getElementById("stBraceCount").textContent = count+" / "+bays.length;
+
+  const hud = document.getElementById("hud");
+  hud.innerHTML =
+    "<div><b>"+SHINDO_LABEL[currentShindo]+"</b>　"+(collapsed?"<span class='collapsed'>倒壊！</span>":judgeText)+"</div>"+
+    "<div>経過 "+runTime.toFixed(1)+" s</div>"+
+    "<div>1F変形 "+(storyDrift.floor1*100).toFixed(1)+"%　2F変形 "+(storyDrift.floor2*100).toFixed(1)+"%</div>";
+}
+
+/* =========================================================
+   10. メインループ
+   ========================================================= */
+function frame(now){
+  if(lastFrameT==null) lastFrameT = now;
+  let dt = (now-lastFrameT)/1000;
+  lastFrameT = now;
+  dt = Math.min(dt, 0.05);
+  if(running && !collapsed){
+    accumulator += dt;
+    let guard=0;
+    while(accumulator>=FIXED_DT && guard<10){ physicsStep(FIXED_DT); accumulator-=FIXED_DT; runTime+=FIXED_DT; guard++; }
+    if(collapsed) running=false, startBtn.textContent="開始";
+  }
+  renderView();
+  updateStatusPanel();
+  requestAnimationFrame(frame);
+}
+
+/* =========================================================
+   11. テスト用フック（Playwright等からの検証用）
+   ========================================================= */
+window.__test = {
+  setAllBays(state){ for(const b of bays) setBayState(b,state); },
+  setBaysForFace(face,state){ for(const b of bays) if(b.face===face) setBayState(b,state); },
+  setBaysForStory(story,state){ for(const b of bays) if(b.story===story) setBayState(b,state); },
+  getBaySummary(){ return bays.map(b=>({id:b.id,state:b.state})); },
+  runHeadless(shindoKey, seconds, exMode){
+    currentShindo = shindoKey;
+    excitationMode = exMode || "earthquake";
+    resetRunOnly();
+    running = true; mode = "sim";
+    const steps = Math.round((seconds||30)/FIXED_DT);
+    for(let i=0;i<steps;i++){
+      physicsStep(FIXED_DT);
+      runTime += FIXED_DT;
+      if(collapsed) break;
+    }
+    return {
+      collapsed, judgeText, runTime,
+      drift1: storyDrift.floor1, drift2: storyDrift.floor2,
+      maxBraceStress,
+    };
+  },
+};
+
+/* =========================================================
+   12. 初期化
+   ========================================================= */
+function init(){
+  buildModel();
+  renderEditor();
+  renderView();
+  updateStatusPanel();
+  requestAnimationFrame(frame);
+}
+window.addEventListener("resize", ()=>{ renderEditor(); renderView(); });
+init();
+
+})();
+</script>
+</body>
+</html>
